@@ -4,15 +4,18 @@
   <meta charset="UTF-8">
   <title>Auto Video Splitter</title>
   <style>
-    body { font-family: sans-serif; max-width: 650px; margin: 40px auto; text-align: center; padding: 20px; background: #f4f6f8; }
+    body { font-family: sans-serif; max-width: 700px; margin: 30px auto; text-align: center; padding: 20px; background: #f4f6f8; }
     .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-    .drop-zone { border: 2px dashed #0070f3; padding: 35px; cursor: pointer; margin-bottom: 20px; border-radius: 10px; background: #f0f7ff; }
+    .drop-zone { border: 2px dashed #0070f3; padding: 30px; cursor: pointer; margin-bottom: 20px; border-radius: 10px; background: #f0f7ff; }
     .drop-zone:hover { background-color: #e0efff; }
-    input, select, button { padding: 12px; margin: 5px; font-size: 16px; border-radius: 6px; border: 1px solid #ccc; }
+    .controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 15px; align-items: center; }
+    input, select, button { padding: 10px 14px; font-size: 15px; border-radius: 6px; border: 1px solid #ccc; }
     button { cursor: pointer; background-color: #0070f3; color: white; border: none; font-weight: bold; }
     button:disabled { background-color: #999; cursor: not-allowed; }
-    #status { margin-top: 20px; font-weight: bold; color: #0070f3; }
-    video { max-width: 100%; margin-top: 15px; border-radius: 8px; display: none; }
+    #stopBtn { background-color: #dc3545; display: none; }
+    #stopBtn:hover { background-color: #b02a37; }
+    #status { margin-top: 18px; font-weight: bold; color: #0070f3; }
+    video { max-width: 100%; max-height: 350px; margin: 15px auto; border-radius: 8px; display: none; background: black; }
     #downloadsList { margin-top: 20px; text-align: left; }
     .dl-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 8px; }
     .dl-btn { background: #28a745; color: white; padding: 6px 12px; text-decoration: none; border-radius: 4px; font-size: 14px; }
@@ -30,14 +33,28 @@
 
     <video id="previewVideo" controls></video>
 
-    <div style="margin-top: 15px;">
-      <label>Split every: </label>
-      <input type="number" id="splitValue" value="10" min="1" style="width: 70px;">
-      <select id="timeUnit">
-        <option value="seconds">Seconds</option>
-        <option value="minutes">Minutes</option>
-      </select>
+    <div class="controls">
+      <div>
+        <label><b>Split every:</b></label>
+        <input type="number" id="splitValue" value="10" min="1" style="width: 65px;">
+        <select id="timeUnit">
+          <option value="seconds">Seconds</option>
+          <option value="minutes">Minutes</option>
+        </select>
+      </div>
+
+      <div>
+        <label><b>Aspect Ratio:</b></label>
+        <select id="aspectRatio">
+          <option value="original">Original</option>
+          <option value="16:9">16:9 (YouTube)</option>
+          <option value="9:16">9:16 (Shorts / Reels)</option>
+          <option value="1:1">1:1 (Square)</option>
+        </select>
+      </div>
+
       <button id="splitBtn">Auto Split & Export</button>
+      <button id="stopBtn">Stop Splitting</button>
     </div>
 
     <p id="status">Status: Ready (Select a video first)</p>
@@ -46,12 +63,17 @@
 
   <script>
     let selectedFile = null;
+    let isCancelled = false;
+    let activeRecorder = null;
+    let activeTimer = null;
+
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
     const statusText = document.getElementById('status');
     const dropText = document.getElementById('dropText');
     const previewVideo = document.getElementById('previewVideo');
     const splitBtn = document.getElementById('splitBtn');
+    const stopBtn = document.getElementById('stopBtn');
     const downloadsList = document.getElementById('downloadsList');
 
     function handleFile(file) {
@@ -61,7 +83,7 @@
       previewVideo.src = URL.createObjectURL(file);
       previewVideo.style.display = "block";
       downloadsList.innerHTML = "";
-      statusText.innerText = "Video loaded! Click 'Auto Split & Export'.";
+      statusText.innerText = "Video loaded! Choose settings and click 'Auto Split & Export'.";
     }
 
     dropZone.addEventListener('click', () => fileInput.click());
@@ -74,6 +96,19 @@
       handleFile(e.dataTransfer.files.item(0));
     });
 
+    // Stop / Cancel button logic
+    stopBtn.addEventListener('click', () => {
+      isCancelled = true;
+      if (activeTimer) clearTimeout(activeTimer);
+      previewVideo.pause();
+      if (activeRecorder && activeRecorder.state !== 'inactive') {
+        activeRecorder.stop();
+      }
+      statusText.innerText = "Splitting stopped by user!";
+      stopBtn.style.display = "none";
+      splitBtn.disabled = false;
+    });
+
     splitBtn.addEventListener('click', async () => {
       if (!selectedFile) {
         alert("Pehle koi video select karein!");
@@ -84,8 +119,11 @@
       if (document.getElementById('timeUnit').value === "minutes") {
         chunkSec = chunkSec * 60;
       }
+      const ratio = document.getElementById('aspectRatio').value;
 
+      isCancelled = false;
       splitBtn.disabled = true;
+      stopBtn.style.display = "inline-block";
       downloadsList.innerHTML = "";
 
       try {
@@ -100,6 +138,51 @@
         const totalDuration = video.duration;
         const totalParts = Math.ceil(totalDuration / chunkSec);
 
+        // Setup Canvas for Aspect Ratio Cropping
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+
+        let targetW = vw;
+        let targetH = vh;
+
+        if (ratio === '16:9') {
+          targetW = vw;
+          targetH = Math.round(vw * 9 / 16);
+          if (targetH > vh) { targetH = vh; targetW = Math.round(vh * 16 / 9); }
+        } else if (ratio === '9:16') {
+          targetH = vh;
+          targetW = Math.round(vh * 9 / 16);
+          if (targetW > vw) { targetW = vw; targetH = Math.round(vw * 16 / 9); }
+        } else if (ratio === '1:1') {
+          const size = Math.min(vw, vh);
+          targetW = size;
+          targetH = size;
+        }
+
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const sx = (vw - targetW) / 2;
+        const sy = (vh - targetH) / 2;
+
+        // Draw frames continuously to canvas while playing
+        let drawActive = true;
+        function drawFrame() {
+          if (!drawActive) return;
+          ctx.drawImage(video, sx, sy, targetW, targetH, 0, 0, targetW, targetH);
+          requestAnimationFrame(drawFrame);
+        }
+        drawFrame();
+
+        // Combine canvas video stream with original audio track
+        const canvasStream = canvas.captureStream(30);
+        const videoStream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+        const audioTracks = videoStream.getAudioTracks();
+        if (audioTracks.length > 0) {
+          canvasStream.addTrack(audioTracks[0]);
+        }
+
         let mimeType = 'video/webm';
         if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) {
           mimeType = 'video/webm;codecs=vp8,opus';
@@ -107,14 +190,14 @@
           mimeType = 'video/mp4';
         }
 
-        const stream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
-
         for (let i = 0; i < totalParts; i++) {
+          if (isCancelled) break;
+
           const startTime = i * chunkSec;
           const endTime = Math.min((i + 1) * chunkSec, totalDuration);
           const durationMs = (endTime - startTime) * 1000;
 
-          statusText.innerText = `Splitting Part ${i + 1} of ${totalParts} (${Math.round(endTime - startTime)}s)...`;
+          statusText.innerText = `Splitting Part ${i + 1} of ${totalParts} (${ratio})...`;
 
           video.currentTime = startTime;
           await new Promise(r => {
@@ -125,51 +208,48 @@
             video.addEventListener('seeked', onSeeked);
           });
 
-          const recorder = new MediaRecorder(stream, { mimeType: mimeType });
+          if (isCancelled) break;
+
+          const recorder = new MediaRecorder(canvasStream, { mimeType: mimeType });
+          activeRecorder = recorder;
           const chunks = [];
           recorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
 
           const partDone = new Promise(resolve => {
             recorder.onstop = () => {
-              const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
-              const fileName = `part_${String(i + 1).padStart(3, '0')}.${ext}`;
-              const blob = new Blob(chunks, { type: mimeType });
-              const url = URL.createObjectURL(blob);
+              if (!isCancelled && chunks.length > 0) {
+                const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+                const fileName = `part_${String(i + 1).padStart(3, '0')}_${ratio.replace(':', 'x')}.${ext}`;
+                const blob = new Blob(chunks, { type: mimeType });
+                const url = URL.createObjectURL(blob);
 
-              // Auto-download trigger
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = fileName;
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
 
-              // Screen par download button bhi dikhayein
-              const div = document.createElement('div');
-              div.className = 'dl-item';
-              div.innerHTML = `<span><b>${fileName}</b> (${Math.round(endTime - startTime)}s)</span> <a href="${url}" download="${fileName}" class="dl-btn">Download</a>`;
-              downloadsList.appendChild(div);
-
+                const div = document.createElement('div');
+                div.className = 'dl-item';
+                div.innerHTML = `<span><b>${fileName}</b> (${Math.round(endTime - startTime)}s)</span> <a href="${url}" download="${fileName}" class="dl-btn">Download</a>`;
+                downloadsList.appendChild(div);
+              }
               resolve();
             };
           });
 
           recorder.start(100);
           await video.play();
-          await new Promise(r => setTimeout(r, durationMs));
+          await new Promise(r => {
+            activeTimer = setTimeout(r, durationMs);
+          });
           video.pause();
-          recorder.stop();
+          if (recorder.state !== 'inactive') recorder.stop();
           await partDone;
         }
 
-        statusText.innerText = `Done! All ${totalParts} parts are ready & downloaded!`;
-      } catch (err) {
-        statusText.innerText = "Error: " + err.message;
-        alert("Error: " + err.message);
-      } finally {
-        splitBtn.disabled = false;
-      }
-    });
-  </script>
-</body>
-</html>
+        drawActive = false;
+        video.pause();
+
+        if (!isCancelled) {
