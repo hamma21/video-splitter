@@ -3,123 +3,148 @@
 <head>
   <meta charset="UTF-8">
   <title>Auto Video Splitter</title>
-  <script src="https://unpkg.com"></script>
   <script src="https://cloudflare.com"></script>
   <style>
-    body { font-family: sans-serif; max-width: 600px; margin: 40px auto; text-align: center; padding: 20px; }
-    .drop-zone { border: 2px dashed #555; padding: 40px; cursor: pointer; margin-bottom: 20px; border-radius: 10px; background: #fafafa; }
-    .drop-zone:hover { background-color: #f0f7ff; border-color: #0070f3; }
-    input, select, button { padding: 10px; margin: 5px; font-size: 16px; border-radius: 5px; border: 1px solid #ccc; }
+    body { font-family: sans-serif; max-width: 650px; margin: 40px auto; text-align: center; padding: 20px; background: #f4f6f8; }
+    .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .drop-zone { border: 2px dashed #0070f3; padding: 40px; cursor: pointer; margin-bottom: 20px; border-radius: 10px; background: #f0f7ff; }
+    .drop-zone:hover { background-color: #e0efff; }
+    input, select, button { padding: 12px; margin: 5px; font-size: 16px; border-radius: 6px; border: 1px solid #ccc; }
     button { cursor: pointer; background-color: #0070f3; color: white; border: none; font-weight: bold; }
-    button:hover { background-color: #005bb5; }
+    button:disabled { background-color: #999; cursor: not-allowed; }
     #status { margin-top: 20px; font-weight: bold; color: #333; }
+    video { max-width: 100%; margin-top: 15px; border-radius: 8px; display: none; }
   </style>
 </head>
 <body>
 
-  <h2>Auto Video Splitter</h2>
-  
-  <div class="drop-zone" id="dropZone">
-    <p id="dropText">Drag & Drop Video Here or Click to Import from PC</p>
-    <input type="file" id="fileInput" accept="video/*" hidden>
-  </div>
+  <div class="card">
+    <h2>Auto Video Splitter</h2>
+    
+    <div class="drop-zone" id="dropZone">
+      <p id="dropText">Drag & Drop Video Here or Click to Import from PC</p>
+      <input type="file" id="fileInput" accept="video/*" style="display:none;">
+    </div>
 
-  <div>
-    <label>Split every: </label>
-    <input type="number" id="splitValue" value="30" min="1" style="width: 80px;">
-    <select id="timeUnit">
-      <option value="seconds">Seconds</option>
-      <option value="minutes">Minutes</option>
-    </select>
-    <button id="splitBtn">Auto Split & Export ZIP</button>
-  </div>
+    <video id="previewVideo" controls></video>
 
-  <p id="status">Status: Ready</p>
+    <div style="margin-top: 15px;">
+      <label>Split every: </label>
+      <input type="number" id="splitValue" value="10" min="1" style="width: 70px;">
+      <select id="timeUnit">
+        <option value="seconds">Seconds</option>
+        <option value="minutes">Minutes</option>
+      </select>
+      <button id="splitBtn">Auto Split & Export ZIP</button>
+    </div>
+
+    <p id="status">Status: Ready (Select a video first)</p>
+  </div>
 
   <script>
-    const { createFFmpeg, fetchFile } = FFmpeg;
-    const ffmpeg = createFFmpeg({ log: true });
     let selectedFile = null;
-
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
     const statusText = document.getElementById('status');
     const dropText = document.getElementById('dropText');
+    const previewVideo = document.getElementById('previewVideo');
+    const splitBtn = document.getElementById('splitBtn');
 
-    dropZone.onclick = () => fileInput.click();
+    function handleFile(file) {
+      if (!file) return;
+      selectedFile = file;
+      dropText.innerText = "Selected: " + file.name;
+      previewVideo.src = URL.createObjectURL(file);
+      previewVideo.style.display = "block";
+      statusText.innerText = "Video loaded! Click 'Auto Split & Export ZIP'.";
+    }
 
-    fileInput.onchange = (e) => {
-      if (e.target.files.length > 0) {
-        selectedFile = e.target.files[0];
-        dropText.innerText = `Selected: ${selectedFile.name}`;
-        statusText.innerText = "Video ready to split!";
-      }
-    };
+    dropZone.addEventListener('click', () => fileInput.click());
 
-    dropZone.ondragover = (e) => {
+    fileInput.addEventListener('change', (e) => {
+      handleFile(e.target.files.item(0));
+    });
+
+    dropZone.addEventListener('dragover', (e) => {
       e.preventDefault();
-      dropZone.style.borderColor = "#0070f3";
-    };
+      dropZone.style.backgroundColor = "#d0e6ff";
+    });
 
-    dropZone.ondragleave = () => {
-      dropZone.style.borderColor = "#555";
-    };
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.style.backgroundColor = "#f0f7ff";
+    });
 
-    dropZone.ondrop = (e) => {
+    dropZone.addEventListener('drop', (e) => {
       e.preventDefault();
-      dropZone.style.borderColor = "#555";
-      if (e.dataTransfer.files.length > 0) {
-        selectedFile = e.dataTransfer.files[0];
-        dropText.innerText = `Selected: ${selectedFile.name}`;
-        statusText.innerText = "Video ready to split!";
-      }
-    };
+      dropZone.style.backgroundColor = "#f0f7ff";
+      handleFile(e.dataTransfer.files.item(0));
+    });
 
-    document.getElementById('splitBtn').onclick = async () => {
-      if (!selectedFile) return alert("Pehle video select karein!");
+    splitBtn.addEventListener('click', async () => {
+      if (!selectedFile) {
+        alert("Pehle koi video select karein!");
+        return;
+      }
+
+      let chunkSec = parseInt(document.getElementById('splitValue').value);
+      if (document.getElementById('timeUnit').value === "minutes") {
+        chunkSec = chunkSec * 60;
+      }
+
+      splitBtn.disabled = true;
+      const zip = new JSZip();
+      const video = document.createElement('video');
+      video.src = URL.createObjectURL(selectedFile);
+      video.muted = true;
+
+      await new Promise(r => video.onloadedmetadata = r);
+      const totalDuration = video.duration;
+      const totalParts = Math.ceil(totalDuration / chunkSec);
+
+      statusText.innerText = `Total Duration: ${Math.round(totalDuration)}s | Splitting into ${totalParts} parts...`;
+
+      const stream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
       
-      let val = parseInt(document.getElementById('splitValue').value);
-      const unit = document.getElementById('timeUnit').value;
-      if (unit === "minutes") val = val * 60;
+      for (let i = 0; i < totalParts; i++) {
+        const startTime = i * chunkSec;
+        const endTime = Math.min((i + 1) * chunkSec, totalDuration);
+        const durationMs = (endTime - startTime) * 1000;
 
-      try {
-        statusText.innerText = "Loading video engine... (Pehli dafa 10 seconds lag sakte hain)";
-        if (!ffmpeg.isLoaded()) await ffmpeg.load();
+        statusText.innerText = `Recording Part ${i + 1} of ${totalParts}... (Please wait)`;
 
-        statusText.innerText = "Splitting video into parts...";
-        ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(selectedFile));
+        video.currentTime = startTime;
+        await new Promise(r => video.onseeked = r);
 
-        await ffmpeg.run(
-          '-i', 'input.mp4',
-          '-c', 'copy',
-          '-map', '0',
-          '-segment_time', val.toString(),
-          '-f', 'segment',
-          '-reset_timestamps', '1',
-          'part_%03d.mp4'
-        );
+        const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+        const chunks = [];
+        recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
 
-        statusText.innerText = "Creating ZIP file...";
-        const zip = new JSZip();
-        const files = ffmpeg.FS('readdir', '/').filter(f => f.startsWith('part_'));
-
-        files.forEach(file => {
-          const data = ffmpeg.FS('readFile', file);
-          zip.file(file, data);
-          ffmpeg.FS('unlink', file);
+        const partDone = new Promise(resolve => {
+          recorder.onstop = () => {
+            const blob = new Blob(chunks, { type: 'video/webm' });
+            zip.file(`part_${String(i + 1).padStart(3, '0')}.webm`, blob);
+            resolve();
+          };
         });
 
-        const content = await zip.generateAsync({ type: "blob" });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(content);
-        link.download = "split_videos.zip";
-        link.click();
-
-        statusText.innerText = `Done! ${files.length} parts exported in ZIP.`;
-      } catch (err) {
-        statusText.innerText = "Error: " + err.message;
+        recorder.start();
+        video.play();
+        await new Promise(r => setTimeout(r, durationMs));
+        video.pause();
+        recorder.stop();
+        await partDone;
       }
-    };
+
+      statusText.innerText = "Creating ZIP file...";
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(zipBlob);
+      a.download = "split_videos.zip";
+      a.click();
+
+      statusText.innerText = `Done! ${totalParts} parts exported in split_videos.zip`;
+      splitBtn.disabled = false;
+    });
   </script>
 </body>
 </html>
