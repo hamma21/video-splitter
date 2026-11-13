@@ -96,7 +96,6 @@
       handleFile(e.dataTransfer.files.item(0));
     });
 
-    // Stop / Cancel button logic
     stopBtn.addEventListener('click', () => {
       isCancelled = true;
       if (activeTimer) clearTimeout(activeTimer);
@@ -138,7 +137,6 @@
         const totalDuration = video.duration;
         const totalParts = Math.ceil(totalDuration / chunkSec);
 
-        // Setup Canvas for Aspect Ratio Cropping
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         const vw = video.videoWidth;
@@ -166,7 +164,6 @@
         const sx = (vw - targetW) / 2;
         const sy = (vh - targetH) / 2;
 
-        // Draw frames continuously to canvas while playing
         let drawActive = true;
         function drawFrame() {
           if (!drawActive) return;
@@ -175,13 +172,9 @@
         }
         drawFrame();
 
-        // Combine canvas video stream with original audio track
         const canvasStream = canvas.captureStream(30);
         const videoStream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
-        const audioTracks = videoStream.getAudioTracks();
-        if (audioTracks.length > 0) {
-          canvasStream.addTrack(audioTracks[0]);
-        }
+        videoStream.getAudioTracks().forEach(track => canvasStream.addTrack(track));
 
         let mimeType = 'video/webm';
         if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) {
@@ -253,3 +246,11 @@
         video.pause();
 
         if (!isCancelled) {
+          statusText.innerText = `Done! All ${totalParts} parts exported!`;
+        }
+      } catch (err) {
+        statusText.innerText = "Error: " + err.message;
+      } finally {
+        splitBtn.disabled = false;
+        stopBtn.style.display = "none";
+        previewVideo.pause();
