@@ -6,14 +6,12 @@
   <style>
     body { font-family: sans-serif; max-width: 700px; margin: 30px auto; text-align: center; padding: 20px; background: #f4f6f8; }
     .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-    .drop-zone { display: block; border: 2px dashed #0070f3; padding: 30px; cursor: pointer; margin-bottom: 20px; border-radius: 10px; background: #f0f7ff; }
-    .drop-zone:hover { background-color: #e0efff; }
+    .upload-box { border: 2px dashed #0070f3; padding: 25px; margin-bottom: 20px; border-radius: 10px; background: #f0f7ff; }
     .controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 15px; align-items: center; }
     input[type="number"], select, button { padding: 10px 14px; font-size: 15px; border-radius: 6px; border: 1px solid #ccc; }
     button { cursor: pointer; background-color: #0070f3; color: white; border: none; font-weight: bold; }
     button:disabled { background-color: #999; cursor: not-allowed; }
     #stopBtn { background-color: #dc3545; display: none; }
-    #stopBtn:hover { background-color: #b02a37; }
     #status { margin-top: 18px; font-weight: bold; color: #0070f3; }
     video { max-width: 100%; max-height: 350px; margin: 15px auto; border-radius: 8px; display: none; background: black; }
     #downloadsList { margin-top: 20px; text-align: left; }
@@ -24,12 +22,12 @@
 <body>
 
   <div class="card">
-    <h2>Auto Video Splitter</h2>
+    <h2>Auto Video Splitter v2</h2>
     
-    <label for="fileInput" class="drop-zone" id="dropZone">
-      <p id="dropText">Drag & Drop Video Here or Click to Import from PC</p>
-      <input type="file" id="fileInput" accept="video/*" style="opacity: 0; position: absolute; z-index: -1;">
-    </label>
+    <div class="upload-box" id="dropZone">
+      <p id="dropText"><b>Select Video from PC or Drag & Drop Here:</b></p>
+      <input type="file" id="fileInput" accept="video/*" onchange="loadVideo(this)" style="font-size: 16px; padding: 10px;">
+    </div>
 
     <video id="previewVideo" controls></video>
 
@@ -53,8 +51,8 @@
         </select>
       </div>
 
-      <button id="splitBtn">Auto Split & Export</button>
-      <button id="stopBtn">Stop Splitting</button>
+      <button id="splitBtn" onclick="startSplitting()">Auto Split & Export</button>
+      <button id="stopBtn" onclick="stopSplitting()">Stop Splitting</button>
     </div>
 
     <p id="status">Status: Ready (Select a video first)</p>
@@ -67,49 +65,50 @@
     let activeRecorder = null;
     let activeTimer = null;
 
-    const dropZone = document.getElementById('dropZone');
-    const fileInput = document.getElementById('fileInput');
     const statusText = document.getElementById('status');
     const dropText = document.getElementById('dropText');
     const previewVideo = document.getElementById('previewVideo');
     const splitBtn = document.getElementById('splitBtn');
     const stopBtn = document.getElementById('stopBtn');
     const downloadsList = document.getElementById('downloadsList');
+    const dropZone = document.getElementById('dropZone');
 
-    function handleFile(file) {
-      if (!file) return;
-      selectedFile = file;
-      dropText.innerText = "Selected: " + file.name;
-      previewVideo.src = URL.createObjectURL(file);
-      previewVideo.style.display = "block";
-      downloadsList.innerHTML = "";
-      statusText.innerText = "Video loaded! Choose settings and click 'Auto Split & Export'.";
+    function loadVideo(input) {
+      if (input.files && input.files.length > 0) {
+        processFile(input.files.item(0));
+      }
     }
 
-    fileInput.addEventListener('change', (e) => {
-      if (e.target.files && e.target.files.length > 0) {
-        handleFile(e.target.files.item(0));
-      }
-    });
+    function processFile(file) {
+      if (!file) return;
+      selectedFile = file;
+      dropText.innerText = "Loaded: " + file.name;
+      const videoURL = URL.createObjectURL(file);
+      previewVideo.src = videoURL;
+      previewVideo.style.display = "block";
+      previewVideo.load();
+      downloadsList.innerHTML = "";
+      statusText.innerText = "Video ready! Choose settings and click 'Auto Split & Export'.";
+    }
 
-    dropZone.addEventListener('dragover', (e) => {
+    dropZone.ondragover = function(e) {
       e.preventDefault();
       dropZone.style.backgroundColor = "#d0e6ff";
-    });
+    };
 
-    dropZone.addEventListener('dragleave', () => {
+    dropZone.ondragleave = function() {
       dropZone.style.backgroundColor = "#f0f7ff";
-    });
+    };
 
-    dropZone.addEventListener('drop', (e) => {
+    dropZone.ondrop = function(e) {
       e.preventDefault();
       dropZone.style.backgroundColor = "#f0f7ff";
       if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-        handleFile(e.dataTransfer.files.item(0));
+        processFile(e.dataTransfer.files.item(0));
       }
-    });
+    };
 
-    stopBtn.addEventListener('click', () => {
+    function stopSplitting() {
       isCancelled = true;
       if (activeTimer) clearTimeout(activeTimer);
       previewVideo.pause();
@@ -119,9 +118,9 @@
       statusText.innerText = "Splitting stopped by user!";
       stopBtn.style.display = "none";
       splitBtn.disabled = false;
-    });
+    }
 
-    splitBtn.addEventListener('click', async () => {
+    async function startSplitting() {
       if (!selectedFile) {
         alert("Pehle koi video select karein!");
         return;
@@ -261,3 +260,8 @@
         if (!isCancelled) {
           statusText.innerText = `Done! All ${totalParts} parts exported!`;
         }
+      } catch (err) {
+        statusText.innerText = "Error: " + err.message;
+      } finally {
+        splitBtn.disabled = false;
+        stopBtn.style.display = "none";
