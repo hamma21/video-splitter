@@ -3,7 +3,6 @@
 <head>
   <meta charset="UTF-8">
   <title>Auto Video Splitter</title>
-  <script src="https://cloudflare.com"></script>
   <style>
     body { font-family: sans-serif; max-width: 650px; margin: 40px auto; text-align: center; padding: 20px; background: #f4f6f8; }
     .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
@@ -14,6 +13,9 @@
     button:disabled { background-color: #999; cursor: not-allowed; }
     #status { margin-top: 20px; font-weight: bold; color: #0070f3; }
     video { max-width: 100%; margin-top: 15px; border-radius: 8px; display: none; }
+    #downloadsList { margin-top: 20px; text-align: left; }
+    .dl-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 8px; }
+    .dl-btn { background: #28a745; color: white; padding: 6px 12px; text-decoration: none; border-radius: 4px; font-size: 14px; }
   </style>
 </head>
 <body>
@@ -35,10 +37,11 @@
         <option value="seconds">Seconds</option>
         <option value="minutes">Minutes</option>
       </select>
-      <button id="splitBtn">Auto Split & Export ZIP</button>
+      <button id="splitBtn">Auto Split & Export</button>
     </div>
 
     <p id="status">Status: Ready (Select a video first)</p>
+    <div id="downloadsList"></div>
   </div>
 
   <script>
@@ -49,6 +52,7 @@
     const dropText = document.getElementById('dropText');
     const previewVideo = document.getElementById('previewVideo');
     const splitBtn = document.getElementById('splitBtn');
+    const downloadsList = document.getElementById('downloadsList');
 
     function handleFile(file) {
       if (!file) return;
@@ -56,7 +60,8 @@
       dropText.innerText = "Selected: " + file.name;
       previewVideo.src = URL.createObjectURL(file);
       previewVideo.style.display = "block";
-      statusText.innerText = "Video loaded! Click 'Auto Split & Export ZIP'.";
+      downloadsList.innerHTML = "";
+      statusText.innerText = "Video loaded! Click 'Auto Split & Export'.";
     }
 
     dropZone.addEventListener('click', () => fileInput.click());
@@ -81,12 +86,12 @@
       }
 
       splitBtn.disabled = true;
+      downloadsList.innerHTML = "";
 
       try {
-        const zip = new JSZip();
         const video = previewVideo;
         video.pause();
-        video.volume = 0.01; // Muted ki bajaye low volume taake browser stream block na kare
+        video.volume = 0.01;
 
         if (isNaN(video.duration)) {
           await new Promise(r => video.onloadedmetadata = r);
@@ -95,7 +100,6 @@
         const totalDuration = video.duration;
         const totalParts = Math.ceil(totalDuration / chunkSec);
 
-        // Supported format auto-detect karein
         let mimeType = 'video/webm';
         if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) {
           mimeType = 'video/webm;codecs=vp8,opus';
@@ -110,7 +114,7 @@
           const endTime = Math.min((i + 1) * chunkSec, totalDuration);
           const durationMs = (endTime - startTime) * 1000;
 
-          statusText.innerText = `Processing Part ${i + 1} of ${totalParts} (${Math.round(endTime - startTime)}s)...`;
+          statusText.innerText = `Splitting Part ${i + 1} of ${totalParts} (${Math.round(endTime - startTime)}s)...`;
 
           video.currentTime = startTime;
           await new Promise(r => {
@@ -128,8 +132,24 @@
           const partDone = new Promise(resolve => {
             recorder.onstop = () => {
               const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+              const fileName = `part_${String(i + 1).padStart(3, '0')}.${ext}`;
               const blob = new Blob(chunks, { type: mimeType });
-              zip.file(`part_${String(i + 1).padStart(3, '0')}.${ext}`, blob);
+              const url = URL.createObjectURL(blob);
+
+              // Auto-download trigger
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = fileName;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+
+              // Screen par download button bhi dikhayein
+              const div = document.createElement('div');
+              div.className = 'dl-item';
+              div.innerHTML = `<span><b>${fileName}</b> (${Math.round(endTime - startTime)}s)</span> <a href="${url}" download="${fileName}" class="dl-btn">Download</a>`;
+              downloadsList.appendChild(div);
+
               resolve();
             };
           });
@@ -142,16 +162,7 @@
           await partDone;
         }
 
-        statusText.innerText = "Creating ZIP file... Please wait";
-        const zipBlob = await zip.generateAsync({ type: "blob" });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(zipBlob);
-        a.download = "split_videos.zip";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-
-        statusText.innerText = `Success! ${totalParts} parts exported in split_videos.zip`;
+        statusText.innerText = `Done! All ${totalParts} parts are ready & downloaded!`;
       } catch (err) {
         statusText.innerText = "Error: " + err.message;
         alert("Error: " + err.message);
