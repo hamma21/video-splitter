@@ -7,12 +7,12 @@
   <style>
     body { font-family: sans-serif; max-width: 650px; margin: 40px auto; text-align: center; padding: 20px; background: #f4f6f8; }
     .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-    .drop-zone { border: 2px dashed #0070f3; padding: 40px; cursor: pointer; margin-bottom: 20px; border-radius: 10px; background: #f0f7ff; }
+    .drop-zone { border: 2px dashed #0070f3; padding: 35px; cursor: pointer; margin-bottom: 20px; border-radius: 10px; background: #f0f7ff; }
     .drop-zone:hover { background-color: #e0efff; }
     input, select, button { padding: 12px; margin: 5px; font-size: 16px; border-radius: 6px; border: 1px solid #ccc; }
     button { cursor: pointer; background-color: #0070f3; color: white; border: none; font-weight: bold; }
     button:disabled { background-color: #999; cursor: not-allowed; }
-    #status { margin-top: 20px; font-weight: bold; color: #333; }
+    #status { margin-top: 20px; font-weight: bold; color: #0070f3; }
     video { max-width: 100%; margin-top: 15px; border-radius: 8px; display: none; }
   </style>
 </head>
@@ -60,20 +60,9 @@
     }
 
     dropZone.addEventListener('click', () => fileInput.click());
-
-    fileInput.addEventListener('change', (e) => {
-      handleFile(e.target.files.item(0));
-    });
-
-    dropZone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      dropZone.style.backgroundColor = "#d0e6ff";
-    });
-
-    dropZone.addEventListener('dragleave', () => {
-      dropZone.style.backgroundColor = "#f0f7ff";
-    });
-
+    fileInput.addEventListener('change', (e) => handleFile(e.target.files.item(0)));
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.backgroundColor = "#d0e6ff"; });
+    dropZone.addEventListener('dragleave', () => { dropZone.style.backgroundColor = "#f0f7ff"; });
     dropZone.addEventListener('drop', (e) => {
       e.preventDefault();
       dropZone.style.backgroundColor = "#f0f7ff";
@@ -92,58 +81,83 @@
       }
 
       splitBtn.disabled = true;
-      const zip = new JSZip();
-      const video = document.createElement('video');
-      video.src = URL.createObjectURL(selectedFile);
-      video.muted = true;
 
-      await new Promise(r => video.onloadedmetadata = r);
-      const totalDuration = video.duration;
-      const totalParts = Math.ceil(totalDuration / chunkSec);
-
-      statusText.innerText = `Total Duration: ${Math.round(totalDuration)}s | Splitting into ${totalParts} parts...`;
-
-      const stream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
-      
-      for (let i = 0; i < totalParts; i++) {
-        const startTime = i * chunkSec;
-        const endTime = Math.min((i + 1) * chunkSec, totalDuration);
-        const durationMs = (endTime - startTime) * 1000;
-
-        statusText.innerText = `Recording Part ${i + 1} of ${totalParts}... (Please wait)`;
-
-        video.currentTime = startTime;
-        await new Promise(r => video.onseeked = r);
-
-        const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
-        const chunks = [];
-        recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-
-        const partDone = new Promise(resolve => {
-          recorder.onstop = () => {
-            const blob = new Blob(chunks, { type: 'video/webm' });
-            zip.file(`part_${String(i + 1).padStart(3, '0')}.webm`, blob);
-            resolve();
-          };
-        });
-
-        recorder.start();
-        video.play();
-        await new Promise(r => setTimeout(r, durationMs));
+      try {
+        const zip = new JSZip();
+        const video = previewVideo;
         video.pause();
-        recorder.stop();
-        await partDone;
+        video.volume = 0.01; // Muted ki bajaye low volume taake browser stream block na kare
+
+        if (isNaN(video.duration)) {
+          await new Promise(r => video.onloadedmetadata = r);
+        }
+
+        const totalDuration = video.duration;
+        const totalParts = Math.ceil(totalDuration / chunkSec);
+
+        // Supported format auto-detect karein
+        let mimeType = 'video/webm';
+        if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) {
+          mimeType = 'video/webm;codecs=vp8,opus';
+        } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+          mimeType = 'video/mp4';
+        }
+
+        const stream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+
+        for (let i = 0; i < totalParts; i++) {
+          const startTime = i * chunkSec;
+          const endTime = Math.min((i + 1) * chunkSec, totalDuration);
+          const durationMs = (endTime - startTime) * 1000;
+
+          statusText.innerText = `Processing Part ${i + 1} of ${totalParts} (${Math.round(endTime - startTime)}s)...`;
+
+          video.currentTime = startTime;
+          await new Promise(r => {
+            const onSeeked = () => {
+              video.removeEventListener('seeked', onSeeked);
+              r();
+            };
+            video.addEventListener('seeked', onSeeked);
+          });
+
+          const recorder = new MediaRecorder(stream, { mimeType: mimeType });
+          const chunks = [];
+          recorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+
+          const partDone = new Promise(resolve => {
+            recorder.onstop = () => {
+              const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+              const blob = new Blob(chunks, { type: mimeType });
+              zip.file(`part_${String(i + 1).padStart(3, '0')}.${ext}`, blob);
+              resolve();
+            };
+          });
+
+          recorder.start(100);
+          await video.play();
+          await new Promise(r => setTimeout(r, durationMs));
+          video.pause();
+          recorder.stop();
+          await partDone;
+        }
+
+        statusText.innerText = "Creating ZIP file... Please wait";
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(zipBlob);
+        a.download = "split_videos.zip";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        statusText.innerText = `Success! ${totalParts} parts exported in split_videos.zip`;
+      } catch (err) {
+        statusText.innerText = "Error: " + err.message;
+        alert("Error: " + err.message);
+      } finally {
+        splitBtn.disabled = false;
       }
-
-      statusText.innerText = "Creating ZIP file...";
-      const zipBlob = await zip.generateAsync({ type: "blob" });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(zipBlob);
-      a.download = "split_videos.zip";
-      a.click();
-
-      statusText.innerText = `Done! ${totalParts} parts exported in split_videos.zip`;
-      splitBtn.disabled = false;
     });
   </script>
 </body>
