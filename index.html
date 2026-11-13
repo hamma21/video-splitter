@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Auto Video Splitter</title>
+  <title>Auto Video Splitter v3</title>
   <style>
     body { font-family: sans-serif; max-width: 700px; margin: 30px auto; text-align: center; padding: 20px; background: #f4f6f8; }
     .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
@@ -13,7 +13,7 @@
     button:disabled { background-color: #999; cursor: not-allowed; }
     #stopBtn { background-color: #dc3545; display: none; }
     #status { margin-top: 18px; font-weight: bold; color: #0070f3; }
-    video { max-width: 100%; max-height: 350px; margin: 15px auto; border-radius: 8px; display: none; background: black; }
+    video { width: 100%; max-height: 360px; margin: 15px auto; border-radius: 8px; display: none; background: black; }
     #downloadsList { margin-top: 20px; text-align: left; }
     .dl-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 8px; }
     .dl-btn { background: #28a745; color: white; padding: 6px 12px; text-decoration: none; border-radius: 4px; font-size: 14px; }
@@ -22,14 +22,14 @@
 <body>
 
   <div class="card">
-    <h2>Auto Video Splitter v2</h2>
+    <h2>Auto Video Splitter v3</h2>
     
     <div class="upload-box" id="dropZone">
       <p id="dropText"><b>Select Video from PC or Drag & Drop Here:</b></p>
-      <input type="file" id="fileInput" accept="video/*" onchange="loadVideo(this)" style="font-size: 16px; padding: 10px;">
+      <input type="file" id="fileInput" accept="video/*,.mp4,.mkv,.webm,.mov" style="font-size: 16px; padding: 10px;">
     </div>
 
-    <video id="previewVideo" controls></video>
+    <video id="previewVideo" controls playsinline></video>
 
     <div class="controls">
       <div>
@@ -51,8 +51,8 @@
         </select>
       </div>
 
-      <button id="splitBtn" onclick="startSplitting()">Auto Split & Export</button>
-      <button id="stopBtn" onclick="stopSplitting()">Stop Splitting</button>
+      <button id="splitBtn">Auto Split & Export</button>
+      <button id="stopBtn">Stop Splitting</button>
     </div>
 
     <p id="status">Status: Ready (Select a video first)</p>
@@ -65,6 +65,7 @@
     let activeRecorder = null;
     let activeTimer = null;
 
+    const fileInput = document.getElementById('fileInput');
     const statusText = document.getElementById('status');
     const dropText = document.getElementById('dropText');
     const previewVideo = document.getElementById('previewVideo');
@@ -73,56 +74,73 @@
     const downloadsList = document.getElementById('downloadsList');
     const dropZone = document.getElementById('dropZone');
 
-    function loadVideo(input) {
-      if (input.files && input.files.length > 0) {
-        processFile(input.files.item(0));
-      }
-    }
-
     function processFile(file) {
       if (!file) return;
       selectedFile = file;
       dropText.innerText = "Loaded: " + file.name;
+      statusText.style.color = "#0070f3";
+      statusText.innerText = "Loading video preview...";
+      
       const videoURL = URL.createObjectURL(file);
-      previewVideo.src = videoURL;
       previewVideo.style.display = "block";
-      previewVideo.load();
+      previewVideo.src = videoURL;
       downloadsList.innerHTML = "";
-      statusText.innerText = "Video ready! Choose settings and click 'Auto Split & Export'.";
     }
 
-    dropZone.ondragover = function(e) {
+    previewVideo.onloadedmetadata = function() {
+      statusText.style.color = "#28a745";
+      statusText.innerText = `Video Ready! Duration: ${Math.round(previewVideo.duration)} seconds. Click 'Auto Split & Export'.`;
+    };
+
+    previewVideo.onerror = function() {
+      statusText.style.color = "#dc3545";
+      statusText.innerText = "Error: Browser cannot play this video codec (HEVC/H.265). Try a standard H.264 MP4 video!";
+    };
+
+    fileInput.addEventListener('change', function() {
+      if (this.files && this.files.length > 0) {
+        processFile(this.files.item(0));
+      }
+    });
+
+    dropZone.addEventListener('dragover', function(e) {
       e.preventDefault();
       dropZone.style.backgroundColor = "#d0e6ff";
-    };
+    });
 
-    dropZone.ondragleave = function() {
+    dropZone.addEventListener('dragleave', function() {
       dropZone.style.backgroundColor = "#f0f7ff";
-    };
+    });
 
-    dropZone.ondrop = function(e) {
+    dropZone.addEventListener('drop', function(e) {
       e.preventDefault();
       dropZone.style.backgroundColor = "#f0f7ff";
       if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         processFile(e.dataTransfer.files.item(0));
       }
-    };
+    });
 
-    function stopSplitting() {
+    stopBtn.addEventListener('click', function() {
       isCancelled = true;
       if (activeTimer) clearTimeout(activeTimer);
       previewVideo.pause();
       if (activeRecorder && activeRecorder.state !== 'inactive') {
         activeRecorder.stop();
       }
+      statusText.style.color = "#dc3545";
       statusText.innerText = "Splitting stopped by user!";
       stopBtn.style.display = "none";
       splitBtn.disabled = false;
-    }
+    });
 
-    async function startSplitting() {
+    splitBtn.addEventListener('click', async function() {
       if (!selectedFile) {
         alert("Pehle koi video select karein!");
+        return;
+      }
+
+      if (isNaN(previewVideo.duration) || previewVideo.duration <= 0) {
+        alert("Video abhi load nahi hui ya iska format browser support nahi kar raha!");
         return;
       }
 
@@ -141,10 +159,6 @@
         const video = previewVideo;
         video.pause();
         video.volume = 0.01;
-
-        if (isNaN(video.duration)) {
-          await new Promise(r => video.onloadedmetadata = r);
-        }
 
         const totalDuration = video.duration;
         const totalParts = Math.ceil(totalDuration / chunkSec);
@@ -202,6 +216,7 @@
           const endTime = Math.min((i + 1) * chunkSec, totalDuration);
           const durationMs = (endTime - startTime) * 1000;
 
+          statusText.style.color = "#0070f3";
           statusText.innerText = `Splitting Part ${i + 1} of ${totalParts} (${ratio})...`;
 
           video.currentTime = startTime;
@@ -238,30 +253,3 @@
                 const div = document.createElement('div');
                 div.className = 'dl-item';
                 div.innerHTML = `<span><b>${fileName}</b> (${Math.round(endTime - startTime)}s)</span> <a href="${url}" download="${fileName}" class="dl-btn">Download</a>`;
-                downloadsList.appendChild(div);
-              }
-              resolve();
-            };
-          });
-
-          recorder.start(100);
-          await video.play();
-          await new Promise(r => {
-            activeTimer = setTimeout(r, durationMs);
-          });
-          video.pause();
-          if (recorder.state !== 'inactive') recorder.stop();
-          await partDone;
-        }
-
-        drawActive = false;
-        video.pause();
-
-        if (!isCancelled) {
-          statusText.innerText = `Done! All ${totalParts} parts exported!`;
-        }
-      } catch (err) {
-        statusText.innerText = "Error: " + err.message;
-      } finally {
-        splitBtn.disabled = false;
-        stopBtn.style.display = "none";
