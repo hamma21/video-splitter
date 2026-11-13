@@ -6,10 +6,10 @@
   <style>
     body { font-family: sans-serif; max-width: 700px; margin: 30px auto; text-align: center; padding: 20px; background: #f4f6f8; }
     .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-    .drop-zone { border: 2px dashed #0070f3; padding: 30px; cursor: pointer; margin-bottom: 20px; border-radius: 10px; background: #f0f7ff; }
+    .drop-zone { display: block; border: 2px dashed #0070f3; padding: 30px; cursor: pointer; margin-bottom: 20px; border-radius: 10px; background: #f0f7ff; }
     .drop-zone:hover { background-color: #e0efff; }
     .controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 15px; align-items: center; }
-    input, select, button { padding: 10px 14px; font-size: 15px; border-radius: 6px; border: 1px solid #ccc; }
+    input[type="number"], select, button { padding: 10px 14px; font-size: 15px; border-radius: 6px; border: 1px solid #ccc; }
     button { cursor: pointer; background-color: #0070f3; color: white; border: none; font-weight: bold; }
     button:disabled { background-color: #999; cursor: not-allowed; }
     #stopBtn { background-color: #dc3545; display: none; }
@@ -26,10 +26,10 @@
   <div class="card">
     <h2>Auto Video Splitter</h2>
     
-    <div class="drop-zone" id="dropZone">
+    <label for="fileInput" class="drop-zone" id="dropZone">
       <p id="dropText">Drag & Drop Video Here or Click to Import from PC</p>
-      <input type="file" id="fileInput" accept="video/*" style="display:none;">
-    </div>
+      <input type="file" id="fileInput" accept="video/*" style="opacity: 0; position: absolute; z-index: -1;">
+    </label>
 
     <video id="previewVideo" controls></video>
 
@@ -86,14 +86,27 @@
       statusText.innerText = "Video loaded! Choose settings and click 'Auto Split & Export'.";
     }
 
-    dropZone.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', (e) => handleFile(e.target.files.item(0)));
-    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.backgroundColor = "#d0e6ff"; });
-    dropZone.addEventListener('dragleave', () => { dropZone.style.backgroundColor = "#f0f7ff"; });
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+        handleFile(e.target.files.item(0));
+      }
+    });
+
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.style.backgroundColor = "#d0e6ff";
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.style.backgroundColor = "#f0f7ff";
+    });
+
     dropZone.addEventListener('drop', (e) => {
       e.preventDefault();
       dropZone.style.backgroundColor = "#f0f7ff";
-      handleFile(e.dataTransfer.files.item(0));
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        handleFile(e.dataTransfer.files.item(0));
+      }
     });
 
     stopBtn.addEventListener('click', () => {
@@ -248,9 +261,3 @@
         if (!isCancelled) {
           statusText.innerText = `Done! All ${totalParts} parts exported!`;
         }
-      } catch (err) {
-        statusText.innerText = "Error: " + err.message;
-      } finally {
-        splitBtn.disabled = false;
-        stopBtn.style.display = "none";
-        previewVideo.pause();
