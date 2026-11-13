@@ -6,11 +6,13 @@
   <script src="https://unpkg.com"></script>
   <script src="https://cloudflare.com"></script>
   <style>
-    body { font-family: sans-serif; max-width: 600px; margin: 40px auto; text-align: center; }
-    .drop-zone { border: 2px dashed #555; padding: 40px; cursor: pointer; margin-bottom: 20px; border-radius: 10px; }
-    .drop-zone:hover { background-color: #f9f9f9; }
-    input, button { padding: 10px; margin: 5px; font-size: 16px; }
-    button { cursor: pointer; background-color: #0070f3; color: white; border: none; border-radius: 5px; }
+    body { font-family: sans-serif; max-width: 600px; margin: 40px auto; text-align: center; padding: 20px; }
+    .drop-zone { border: 2px dashed #555; padding: 40px; cursor: pointer; margin-bottom: 20px; border-radius: 10px; background: #fafafa; }
+    .drop-zone:hover { background-color: #f0f7ff; border-color: #0070f3; }
+    input, select, button { padding: 10px; margin: 5px; font-size: 16px; border-radius: 5px; border: 1px solid #ccc; }
+    button { cursor: pointer; background-color: #0070f3; color: white; border: none; font-weight: bold; }
+    button:hover { background-color: #005bb5; }
+    #status { margin-top: 20px; font-weight: bold; color: #333; }
   </style>
 </head>
 <body>
@@ -18,13 +20,17 @@
   <h2>Auto Video Splitter</h2>
   
   <div class="drop-zone" id="dropZone">
-    Drag & Drop Video Here or Click to Import from PC
+    <p id="dropText">Drag & Drop Video Here or Click to Import from PC</p>
     <input type="file" id="fileInput" accept="video/*" hidden>
   </div>
 
   <div>
-    <label>Split every (seconds): </label>
-    <input type="number" id="splitSeconds" value="30" min="1">
+    <label>Split every: </label>
+    <input type="number" id="splitValue" value="30" min="1" style="width: 80px;">
+    <select id="timeUnit">
+      <option value="seconds">Seconds</option>
+      <option value="minutes">Minutes</option>
+    </select>
     <button id="splitBtn">Auto Split & Export ZIP</button>
   </div>
 
@@ -38,56 +44,81 @@
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
     const statusText = document.getElementById('status');
+    const dropText = document.getElementById('dropText');
 
     dropZone.onclick = () => fileInput.click();
+
     fileInput.onchange = (e) => {
-      selectedFile = e.target.files[0];
-      if (selectedFile) statusText.innerText = `Selected: ${selectedFile.name}`;
+      if (e.target.files.length > 0) {
+        selectedFile = e.target.files[0];
+        dropText.innerText = `Selected: ${selectedFile.name}`;
+        statusText.innerText = "Video ready to split!";
+      }
     };
 
-    dropZone.ondragover = (e) => e.preventDefault();
+    dropZone.ondragover = (e) => {
+      e.preventDefault();
+      dropZone.style.borderColor = "#0070f3";
+    };
+
+    dropZone.ondragleave = () => {
+      dropZone.style.borderColor = "#555";
+    };
+
     dropZone.ondrop = (e) => {
       e.preventDefault();
-      selectedFile = e.dataTransfer.files[0];
-      if (selectedFile) statusText.innerText = `Selected: ${selectedFile.name}`;
+      dropZone.style.borderColor = "#555";
+      if (e.dataTransfer.files.length > 0) {
+        selectedFile = e.dataTransfer.files[0];
+        dropText.innerText = `Selected: ${selectedFile.name}`;
+        statusText.innerText = "Video ready to split!";
+      }
     };
 
     document.getElementById('splitBtn').onclick = async () => {
       if (!selectedFile) return alert("Pehle video select karein!");
       
-      const seconds = document.getElementById('splitSeconds').value;
-      statusText.innerText = "Loading engine & splitting video... (Thoda intezar karein)";
+      let val = parseInt(document.getElementById('splitValue').value);
+      const unit = document.getElementById('timeUnit').value;
+      if (unit === "minutes") val = val * 60;
 
-      if (!ffmpeg.isLoaded()) await ffmpeg.load();
+      try {
+        statusText.innerText = "Loading video engine... (Pehli dafa 10 seconds lag sakte hain)";
+        if (!ffmpeg.isLoaded()) await ffmpeg.load();
 
-      ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(selectedFile));
+        statusText.innerText = "Splitting video into parts...";
+        ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(selectedFile));
 
-      await ffmpeg.run(
-        '-i', 'input.mp4',
-        '-c', 'copy',
-        '-map', '0',
-        '-segment_time', seconds.toString(),
-        '-f', 'segment',
-        '-reset_timestamps', '1',
-        'part_%03d.mp4'
-      );
+        await ffmpeg.run(
+          '-i', 'input.mp4',
+          '-c', 'copy',
+          '-map', '0',
+          '-segment_time', val.toString(),
+          '-f', 'segment',
+          '-reset_timestamps', '1',
+          'part_%03d.mp4'
+        );
 
-      statusText.innerText = "Creating ZIP file...";
-      const zip = new JSZip();
-      const files = ffmpeg.FS('readdir', '/').filter(f => f.startsWith('part_'));
+        statusText.innerText = "Creating ZIP file...";
+        const zip = new JSZip();
+        const files = ffmpeg.FS('readdir', '/').filter(f => f.startsWith('part_'));
 
-      files.forEach(file => {
-        const data = ffmpeg.FS('readFile', file);
-        zip.file(file, data);
-      });
+        files.forEach(file => {
+          const data = ffmpeg.FS('readFile', file);
+          zip.file(file, data);
+          ffmpeg.FS('unlink', file);
+        });
 
-      const content = await zip.generateAsync({ type: "blob" });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(content);
-      link.download = "split_videos.zip";
-      link.click();
+        const content = await zip.generateAsync({ type: "blob" });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(content);
+        link.download = "split_videos.zip";
+        link.click();
 
-      statusText.innerText = `Done! ${files.length} parts exported.`;
+        statusText.innerText = `Done! ${files.length} parts exported in ZIP.`;
+      } catch (err) {
+        statusText.innerText = "Error: " + err.message;
+      }
     };
   </script>
 </body>
