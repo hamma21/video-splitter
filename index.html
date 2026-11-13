@@ -58,6 +58,24 @@
   .player video { width: 100%; height: 100%; display: none; object-fit: contain; background: #000; }
   #placeholder { color: var(--muted); font-size: 15px; padding: 20px; text-align: center; }
   .frameNote { color: var(--muted); font-size: 13px; margin: 8px 0 0; text-align: center; }
+  #bigPlay {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 74px; height: 74px; border-radius: 50%; border: none; cursor: pointer;
+    background: rgba(18,22,28,.75); color: #fff; font-size: 30px;
+    display: none; align-items: center; justify-content: center; padding: 0 0 0 6px;
+  }
+  #bigPlay:hover { background: var(--accent); color: var(--accent-ink); }
+  .ctrlbar {
+    position: absolute; left: 0; right: 0; bottom: 0; display: none; align-items: center; gap: 10px;
+    padding: 24px 12px 10px; background: linear-gradient(transparent, rgba(0,0,0,.8));
+  }
+  .ctrlbar button {
+    flex: none; width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer;
+    background: rgba(255,255,255,.2); color: #fff; font-size: 14px;
+  }
+  .ctrlbar button:hover { background: var(--accent); color: var(--accent-ink); }
+  #seek { flex: 1; min-width: 0; accent-color: var(--accent); }
+  #timeText { color: #fff; font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
   .timeline { display: flex; gap: 3px; margin-top: 12px; height: 12px; }
   .seg { flex: 1; background: var(--line); border-radius: 3px; }
@@ -109,7 +127,13 @@
     <h2>2. Live preview</h2>
     <div class="player" id="player">
       <div id="placeholder">Abhi koi video load nahi hui</div>
-      <video id="previewVideo" controls playsinline></video>
+      <video id="previewVideo" playsinline></video>
+      <button id="bigPlay" aria-label="Play video">&#9654;</button>
+      <div class="ctrlbar" id="ctrlBar">
+        <button id="playBtn" aria-label="Play or pause">&#9654;</button>
+        <input type="range" id="seek" min="0" max="1000" value="0" aria-label="Seek">
+        <span id="timeText">0:00 / 0:00</span>
+      </div>
     </div>
     <p class="frameNote" id="frameNote"></p>
     <div class="timeline" id="timeline"></div>
@@ -141,12 +165,13 @@
 
     <div class="actions">
       <button class="btn primary" id="splitBtn" disabled>Auto Split and Export</button>
+      <button class="btn" id="pauseSplitBtn" style="display:none;">Pause Splitting</button>
       <button class="btn danger" id="stopBtn" style="display:none;">Stop Splitting</button>
     </div>
 
     <div class="bar"><div id="barFill"></div></div>
     <p id="status">Pehle video select karein.</p>
-    <p class="hint">Split ke dauran is tab ko open aur visible rakhein. Clips real-time mein record hoti hain, yani 10 minute ki video ko 10 minute lagte hain.</p>
+    <p class="hint">Split ke dauran video pause karein to splitting bhi ruk jati hai, aur dobara play karne par wahin se continue hoti hai. Is tab ko open aur visible rakhein. Clips real-time mein record hoti hain, yani 10 minute ki video ko 10 minute lagte hain.</p>
   </div>
 
   <div class="panel" id="resultPanel" style="display:none;">
@@ -185,6 +210,15 @@
   const splitValue = document.getElementById('splitValue');
   const timeUnit = document.getElementById('timeUnit');
   const aspectRatio = document.getElementById('aspectRatio');
+  const bigPlay = document.getElementById('bigPlay');
+  const ctrlBar = document.getElementById('ctrlBar');
+  const playBtn = document.getElementById('playBtn');
+  const seek = document.getElementById('seek');
+  const timeText = document.getElementById('timeText');
+  const pauseSplitBtn = document.getElementById('pauseSplitBtn');
+  let partEnding = false;
+  let currentPart = 0;
+  let totalPartsRun = 0;
 
   function setStatus(msg, kind) {
     statusText.className = kind || '';
@@ -271,6 +305,10 @@
     downloadsList.innerHTML = '';
     resultPanel.style.display = 'none';
     frameNote.innerText = '';
+    ctrlBar.style.display = 'none';
+    bigPlay.style.display = 'none';
+    seek.value = 0;
+    timeText.innerText = '0:00 / 0:00';
   }
 
   function processFile(file) {
@@ -298,6 +336,9 @@
     splitBtn.disabled = false;
     updateFrame();
     buildTimeline();
+    ctrlBar.style.display = 'flex';
+    updatePlayUI();
+    updateTime();
   });
 
   previewVideo.addEventListener('error', function () {
@@ -327,6 +368,62 @@
   aspectRatio.addEventListener('change', function () { if (!isRunning) updateFrame(); });
   splitValue.addEventListener('input', function () { if (!isRunning) buildTimeline(); });
   timeUnit.addEventListener('change', function () { if (!isRunning) buildTimeline(); });
+
+  /* Player controls + split pause/resume */
+  function fmt(sec) {
+    const t = Math.max(0, Math.floor(sec || 0));
+    return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+  }
+
+  function updateTime() {
+    const d = previewVideo.duration;
+    timeText.innerText = fmt(previewVideo.currentTime) + ' / ' + fmt(d);
+    if (d && isFinite(d)) seek.value = Math.round((previewVideo.currentTime / d) * 1000);
+  }
+
+  function updatePlayUI() {
+    const paused = previewVideo.paused && !(isRunning && partEnding);
+    playBtn.innerHTML = paused ? '\u25B6' : '\u275A\u275A';
+    bigPlay.style.display = (videoReady && paused) ? 'flex' : 'none';
+    pauseSplitBtn.innerText = paused ? 'Resume Splitting' : 'Pause Splitting';
+  }
+
+  function togglePlay() {
+    if (!videoReady) return;
+    if (previewVideo.paused) {
+      const p = previewVideo.play();
+      if (p && p.catch) p.catch(function () {});
+    } else {
+      previewVideo.pause();
+    }
+  }
+
+  bigPlay.addEventListener('click', togglePlay);
+  playBtn.addEventListener('click', togglePlay);
+  previewVideo.addEventListener('click', togglePlay);
+  pauseSplitBtn.addEventListener('click', togglePlay);
+  previewVideo.addEventListener('timeupdate', updateTime);
+
+  seek.addEventListener('input', function () {
+    if (isRunning || !videoReady) return;
+    previewVideo.currentTime = (seek.value / 1000) * previewVideo.duration;
+  });
+
+  previewVideo.addEventListener('pause', function () {
+    updatePlayUI();
+    if (isRunning && !isCancelled && !partEnding && activeRecorder && activeRecorder.state === 'recording') {
+      activeRecorder.pause();
+      setStatus('Splitting ruk gayi (Part ' + currentPart + ' of ' + totalPartsRun + '). Play dabayein to wahin se continue hogi.', 'work');
+    }
+  });
+
+  previewVideo.addEventListener('play', function () {
+    updatePlayUI();
+    if (isRunning && !isCancelled && activeRecorder && activeRecorder.state === 'paused') {
+      activeRecorder.resume();
+      setStatus('Part ' + currentPart + ' of ' + totalPartsRun + ' dobara record ho raha hai...', 'work');
+    }
+  });
 
   /* Audio: split ke dauran awaaz speakers mein nahi aati, lekin clips mein record hoti hai */
   function setupAudio() {
@@ -431,6 +528,8 @@
     splitBtn.disabled = true;
     fileInput.disabled = true;
     stopBtn.style.display = 'inline-block';
+    pauseSplitBtn.style.display = 'inline-block';
+    seek.disabled = true;
     downloadsList.innerHTML = '';
     resultPanel.style.display = 'none';
     barFill.style.width = '0%';
@@ -445,7 +544,6 @@
 
     try {
       video.pause();
-      video.controls = false;
       setupAudio();
       if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
       muteSpeakers(true);
@@ -477,6 +575,8 @@
         const startTime = i * chunkSec;
         const endTime = Math.min((i + 1) * chunkSec, totalDuration);
         markSegment(i, 'active');
+        currentPart = i + 1;
+        totalPartsRun = totalParts;
         setStatus('Part ' + (i + 1) + ' of ' + totalParts + ' record ho raha hai (' + aspectRatio.value + ')...', 'work');
 
         await waitSeek(startTime);
@@ -496,6 +596,7 @@
           isCancelled = true;
         }
 
+        partEnding = false;
         await new Promise(function (resolve) {
           activeTimer = setInterval(function () {
             const partProgress = Math.min(1, Math.max(0, (video.currentTime - startTime) / (endTime - startTime)));
@@ -507,6 +608,7 @@
           }, 100);
         });
 
+        partEnding = true;
         video.pause();
         if (recorder.state !== 'inactive') recorder.stop();
         await stopped;
@@ -533,12 +635,15 @@
       drawActive = false;
       muteSpeakers(false);
       video.pause();
-      video.controls = true;
       try { video.currentTime = 0; } catch (err) {}
       isRunning = false;
       activeRecorder = null;
       fileInput.disabled = false;
       stopBtn.style.display = 'none';
+      pauseSplitBtn.style.display = 'none';
+      seek.disabled = false;
+      partEnding = false;
+      updatePlayUI();
       splitBtn.disabled = !videoReady;
     }
   });
