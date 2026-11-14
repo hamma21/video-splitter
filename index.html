@@ -119,12 +119,14 @@
     font-size: 14px; word-break: break-all;
   }
   .dl-btn { background: var(--accent); color: var(--accent-ink); padding: 6px 12px; border-radius: 6px; text-decoration: none; font-weight: 600; white-space: nowrap; }
+  .topbar { margin: -8px 0 16px; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>Auto Video Splitter v4</h1>
   <p class="sub">Video choose karein, preview dekhein, phir split karein. Sab kuch aapke browser mein hota hai.</p>
+  <div class="topbar"><button class="btn" id="removeBtn" type="button" style="display:none;">&larr; Back / Remove Video</button></div>
 
   <div class="panel">
     <h2>1. Video choose karein</h2>
@@ -253,6 +255,8 @@
   const pauseSplitBtn = document.getElementById('pauseSplitBtn');
   const quickBtn = document.getElementById('quickBtn');
   const quickMode = document.getElementById('quickMode');
+  const removeBtn = document.getElementById('removeBtn');
+  let runToken = 0;
   let partEnding = false;
   let currentPart = 0;
   let totalPartsRun = 0;
@@ -358,11 +362,37 @@
     timeText.innerText = '0:00 / 0:00';
   }
 
+  function removeVideo() {
+    if (isRunning) stopBtn.click();
+    runToken++;
+    selectedFile = null;
+    videoReady = false;
+    previewVideo.pause();
+    previewVideo.removeAttribute('src');
+    previewVideo.load();
+    if (objectURL) { URL.revokeObjectURL(objectURL); objectURL = null; }
+    fileInput.value = '';
+    fileName.innerText = '';
+    dropText.innerText = 'Video yahan drag and drop karein, ya button dabayein';
+    previewVideo.style.display = 'none';
+    placeholder.style.display = 'block';
+    player.style.aspectRatio = '16 / 9';
+    player.style.maxWidth = '100%';
+    resetVideoState();
+    removeBtn.style.display = 'none';
+    splitBtn.disabled = true;
+    quickBtn.disabled = true;
+    setStatus('Pehle video select karein.', '');
+  }
+
+  removeBtn.addEventListener('click', removeVideo);
+
   function processFile(file) {
     if (!file || isRunning) return;
     resetVideoState();
     selectedFile = file;
     quickBtn.disabled = false;
+    removeBtn.style.display = 'inline-block';
     fileName.innerText = file.name + ' (' + (file.size / 1048576).toFixed(1) + ' MB)';
     dropText.innerText = 'Video select ho gayi';
     setStatus('Video load ho rahi hai, thora intezar karein...', 'work');
@@ -1115,6 +1145,7 @@
     }
     const ratioVal = aspectRatio.value;
     const wantExact = quickMode.value === 'exact';
+    const myRun = ++runToken;
     isRunning = true;
     isCancelled = false;
     splitBtn.disabled = true;
@@ -1151,12 +1182,12 @@
       let made = 0;
 
       async function addResult(k, res) {
+        if (isCancelled || myRun !== runToken) return;
         const name = 'part_' + String(k + 1).padStart(3, '0') + '_' + (exactMode ? ratioVal.replace(':', 'x') : 'original') + '.mp4';
         const url = URL.createObjectURL(res.blob);
         const dlBtn = addDownload(res.blob, url, name, res.duration);
         if (autoDl.checked) {
-          const where = await saveClip(res.blob, url, name);
-          if (where === 'folder') dlBtn.innerText = 'Saved \u2713';
+          await autoSaveClip(res.blob, url, name, dlBtn);
         }
         made++;
         doneSec += res.duration;
@@ -1279,17 +1310,46 @@
     folderLabel.innerText = msg || 'Folder select nahi hai: normal browser download hogi.';
   }
 
+  let saveQueue = Promise.resolve();
+
   async function saveClip(blob, url, name) {
-    if (dirHandle) {
-      try {
-        await writeToFolder(blob, name);
-        return 'folder';
-      } catch (err) {
-        resetFolder('Folder mein save nahi ho saka, ab normal browser download use hogi.');
-      }
+    if (!dirHandle) {
+      autoDownload(url, name);
+      return 'download';
     }
-    autoDownload(url, name);
-    return 'download';
+    const folder = dirHandle;
+    const job = saveQueue.then(async function () {
+      let lastErr = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          if (folder.queryPermission) {
+            let perm = await folder.queryPermission({ mode: 'readwrite' });
+            if (perm !== 'granted' && folder.requestPermission) perm = await folder.requestPermission({ mode: 'readwrite' });
+          }
+          const fh = await folder.getFileHandle(name, { create: true });
+          const w = await fh.createWritable();
+          await w.write(blob);
+          await w.close();
+          return 'folder';
+        } catch (err) {
+          lastErr = err;
+          await new Promise(function (r) { setTimeout(r, 250 * (attempt + 1)); });
+        }
+      }
+      throw lastErr;
+    });
+    saveQueue = job.catch(function () {});
+    return job;
+  }
+
+  async function autoSaveClip(blob, url, name, btn) {
+    try {
+      const where = await saveClip(blob, url, name);
+      if (where === 'folder') btn.innerText = 'Saved \u2713';
+    } catch (err) {
+      btn.innerText = 'Save fail, dobara dabayein';
+      setStatus('Folder mein ' + name + ' save nahi ho saki. Us clip ka button dabayein (folder wahi rahega, Downloads mein nahi jayegi).', 'err');
+    }
   }
 
   pickFolderBtn.addEventListener('click', async function () {
@@ -1330,8 +1390,13 @@
     dl.className = 'dl-btn';
     dl.innerText = 'Download';
     dl.addEventListener('click', async function () {
-      const where = await saveClip(blob, url, name);
-      dl.innerText = (where === 'folder') ? 'Saved \u2713' : 'Download';
+      try {
+        const where = await saveClip(blob, url, name);
+        dl.innerText = (where === 'folder') ? 'Saved \u2713' : 'Download';
+      } catch (err) {
+        dl.innerText = 'Dobara try karein';
+        setStatus('Folder mein save nahi ho saka. Select Save Folder se folder dobara chunein ya permission allow karein.', 'err');
+      }
     });
 
     btns.appendChild(pv);
@@ -1478,8 +1543,7 @@
           const url = URL.createObjectURL(blob);
           const dlBtn = addDownload(blob, url, name, endTime - startTime);
           if (autoDl.checked) {
-            const where = await saveClip(blob, url, name);
-            if (where === 'folder') dlBtn.innerText = 'Saved \u2713';
+            await autoSaveClip(blob, url, name, dlBtn);
           }
           markSegment(i, 'done');
         }
