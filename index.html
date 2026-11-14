@@ -57,6 +57,19 @@
   }
   .player video { width: 100%; height: 100%; display: none; object-fit: contain; background: #000; }
   #placeholder { color: var(--muted); font-size: 15px; padding: 20px; text-align: center; }
+  .saveBox { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+  label.chk { display: flex; align-items: center; gap: 8px; color: var(--text); cursor: pointer; margin: 0; font-size: 15px; }
+  label.chk input { width: 18px; height: 18px; accent-color: var(--accent); }
+  .saveRow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+  .saveRow .btn { padding: 8px 14px; font-size: 14px; }
+  .dl-btns { display: flex; gap: 6px; flex: none; }
+  button.dl-btn { border: none; cursor: pointer; font-size: 14px; font-family: inherit; }
+  button.dl-btn.alt { background: #2f3b4d; color: var(--text); }
+  button.dl-btn:hover { filter: brightness(1.15); }
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.82); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 50; }
+  .modalBox { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; width: 100%; max-width: 720px; }
+  .modalHead { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-weight: 600; word-break: break-all; }
+  #modalVideo { width: 100%; max-height: 68vh; background: #000; border-radius: 8px; margin-top: 10px; }
   .frameNote { color: var(--muted); font-size: 13px; margin: 8px 0 0; text-align: center; }
   #bigPlay {
     position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
@@ -163,20 +176,38 @@
       </div>
     </div>
 
+    <div class="saveBox">
+      <label class="chk"><input type="checkbox" id="autoDl"> Auto download enable (clips ban-te hi khud save hongi)</label>
+      <div class="saveRow">
+        <button class="btn" id="pickFolderBtn" type="button">Select Save Folder</button>
+        <button class="btn" id="clearFolderBtn" type="button" style="display:none;">Folder hatayein</button>
+        <span id="folderLabel" class="hint" style="margin:0;">Folder select nahi hai: normal browser download hogi.</span>
+      </div>
+      <p class="hint">Auto download off ho to clips neeche list mein ready milengi, PC mein save nahi hongi. Aap Preview ya Download khud dabayein.</p>
+    </div>
+
     <div class="actions">
       <button class="btn primary" id="splitBtn" disabled>Auto Split and Export</button>
+      <button class="btn" id="quickBtn" disabled>Quick Split (5-10 sec)</button>
       <button class="btn" id="pauseSplitBtn" style="display:none;">Pause Splitting</button>
       <button class="btn danger" id="stopBtn" style="display:none;">Stop Splitting</button>
     </div>
 
     <div class="bar"><div id="barFill"></div></div>
     <p id="status">Pehle video select karein.</p>
-    <p class="hint">Split ke dauran video pause karein to splitting bhi ruk jati hai, aur dobara play karne par wahin se continue hoti hai. Is tab ko open aur visible rakhein. Clips real-time mein record hoti hain, yani 10 minute ki video ko 10 minute lagte hain.</p>
+    <p class="hint">Split ke dauran video pause karein to splitting bhi ruk jati hai, aur dobara play karne par wahin se continue hoti hai. Is tab ko open aur visible rakhein. Auto Split clips real-time mein record karta hai (aspect ratio crop ke saath). Quick Split MP4/MOV ko bina play kiye foran kaat deta hai, lekin cut keyframe par lagta hai (clip length 1-2 sec upar neeche ho sakti hai) aur aspect ratio Original rehta hai.</p>
   </div>
 
   <div class="panel" id="resultPanel" style="display:none;">
-    <h2>Exported clips</h2>
+    <h2>Ready clips</h2>
     <div id="downloadsList"></div>
+  </div>
+</div>
+
+<div id="modal">
+  <div class="modalBox">
+    <div class="modalHead"><span id="modalTitle"></span><button class="btn" id="modalClose" type="button">Close</button></div>
+    <video id="modalVideo" controls playsinline></video>
   </div>
 </div>
 
@@ -216,9 +247,19 @@
   const seek = document.getElementById('seek');
   const timeText = document.getElementById('timeText');
   const pauseSplitBtn = document.getElementById('pauseSplitBtn');
+  const quickBtn = document.getElementById('quickBtn');
   let partEnding = false;
   let currentPart = 0;
   let totalPartsRun = 0;
+  let dirHandle = null;
+  const autoDl = document.getElementById('autoDl');
+  const pickFolderBtn = document.getElementById('pickFolderBtn');
+  const clearFolderBtn = document.getElementById('clearFolderBtn');
+  const folderLabel = document.getElementById('folderLabel');
+  const modal = document.getElementById('modal');
+  const modalVideo = document.getElementById('modalVideo');
+  const modalTitle = document.getElementById('modalTitle');
+  const modalClose = document.getElementById('modalClose');
 
   function setStatus(msg, kind) {
     statusText.className = kind || '';
@@ -300,6 +341,7 @@
   function resetVideoState() {
     videoReady = false;
     splitBtn.disabled = true;
+    quickBtn.disabled = true;
     timeline.innerHTML = '';
     barFill.style.width = '0%';
     downloadsList.innerHTML = '';
@@ -315,6 +357,7 @@
     if (!file || isRunning) return;
     resetVideoState();
     selectedFile = file;
+    quickBtn.disabled = false;
     fileName.innerText = file.name + ' (' + (file.size / 1048576).toFixed(1) + ' MB)';
     dropText.innerText = 'Video select ho gayi';
     setStatus('Video load ho rahi hai, thora intezar karein...', 'work');
@@ -345,6 +388,7 @@
     if (!selectedFile) return;
     videoReady = false;
     splitBtn.disabled = true;
+    quickBtn.disabled = false;
     setStatus('Error: Browser is video ka codec play nahi kar sakta (shayad HEVC/H.265). Standard H.264 MP4 ya WebM use karein.', 'err');
   });
 
@@ -425,6 +469,396 @@
     }
   });
 
+  /* QS-START: Quick Split (MP4/MOV stream copy, no re-encode) */
+  function str4(dv, p) {
+    return String.fromCharCode(dv.getUint8(p), dv.getUint8(p + 1), dv.getUint8(p + 2), dv.getUint8(p + 3));
+  }
+
+  function parseBoxes(dv, start, end) {
+    const out = [];
+    let pos = start;
+    while (pos + 8 <= end) {
+      const size = dv.getUint32(pos);
+      if (size < 8) break;
+      out.push({ type: str4(dv, pos + 4), start: pos, end: Math.min(pos + size, end) });
+      pos += size;
+    }
+    return out;
+  }
+
+  function child(dv, box, type) {
+    const found = parseBoxes(dv, box.start + 8, box.end).find(function (b) { return b.type === type; });
+    return found || null;
+  }
+
+  function concat(parts) {
+    let n = 0;
+    parts.forEach(function (p) { n += p.length; });
+    const out = new Uint8Array(n);
+    let o = 0;
+    parts.forEach(function (p) { out.set(p, o); o += p.length; });
+    return out;
+  }
+
+  function u32s(list) {
+    const b = new Uint8Array(list.length * 4);
+    const dv = new DataView(b.buffer);
+    list.forEach(function (v, i) { dv.setUint32(i * 4, v >>> 0); });
+    return b;
+  }
+
+  function mk(type, parts) {
+    const body = concat(parts);
+    const h = new Uint8Array(8);
+    const dv = new DataView(h.buffer);
+    dv.setUint32(0, body.length + 8);
+    for (let i = 0; i < 4; i++) dv.setUint8(4 + i, type.charCodeAt(i));
+    return concat([h, body]);
+  }
+
+  function rle(list) {
+    const out = [];
+    let cur = null;
+    let cnt = 0;
+    list.forEach(function (v) {
+      if (cnt > 0 && v === cur) {
+        cnt++;
+      } else {
+        if (cnt > 0) out.push(cnt, cur);
+        cur = v;
+        cnt = 1;
+      }
+    });
+    if (cnt > 0) out.push(cnt, cur);
+    return out;
+  }
+
+  async function readTopBoxes(file) {
+    const list = [];
+    let pos = 0;
+    while (pos + 8 <= file.size) {
+      const dv = new DataView(await file.slice(pos, Math.min(pos + 16, file.size)).arrayBuffer());
+      let size = dv.getUint32(0);
+      const type = str4(dv, 4);
+      if (size === 1 && dv.byteLength >= 16) size = Number(dv.getBigUint64(8));
+      else if (size === 0) size = file.size - pos;
+      if (size < 8) break;
+      list.push({ type: type, start: pos, size: size });
+      pos += size;
+    }
+    return list;
+  }
+
+  function readTrack(mdv, trak) {
+    const mdia = child(mdv, trak, 'mdia');
+    if (!mdia) return null;
+    const mdhd = child(mdv, mdia, 'mdhd');
+    const hdlr = child(mdv, mdia, 'hdlr');
+    const minf = child(mdv, mdia, 'minf');
+    const stbl = minf ? child(mdv, minf, 'stbl') : null;
+    if (!mdhd || !hdlr || !stbl) return null;
+    const kind = str4(mdv, hdlr.start + 16);
+    if (kind !== 'vide' && kind !== 'soun') return null;
+
+    const mver = mdv.getUint8(mdhd.start + 8);
+    const ts = mdv.getUint32(mdhd.start + 8 + (mver === 1 ? 20 : 12));
+    const stts = child(mdv, stbl, 'stts');
+    const stsz = child(mdv, stbl, 'stsz');
+    const stsc = child(mdv, stbl, 'stsc');
+    const stco32 = child(mdv, stbl, 'stco');
+    const co64 = child(mdv, stbl, 'co64');
+    const stss = child(mdv, stbl, 'stss');
+    const ctts = child(mdv, stbl, 'ctts');
+    if (!stts || !stsz || !stsc || !(stco32 || co64)) return null;
+
+    const deltas = [];
+    const nStts = mdv.getUint32(stts.start + 12);
+    let p = stts.start + 16;
+    for (let e = 0; e < nStts; e++) {
+      const c = mdv.getUint32(p);
+      const d = mdv.getUint32(p + 4);
+      for (let k = 0; k < c; k++) deltas.push(d);
+      p += 8;
+    }
+
+    const fixed = mdv.getUint32(stsz.start + 12);
+    const n = mdv.getUint32(stsz.start + 16);
+    const sizes = [];
+    for (let i = 0; i < n; i++) sizes.push(fixed ? fixed : mdv.getUint32(stsz.start + 20 + i * 4));
+
+    const runs = [];
+    const nRuns = mdv.getUint32(stsc.start + 12);
+    for (let r = 0; r < nRuns; r++) {
+      const q = stsc.start + 16 + r * 12;
+      runs.push({ first: mdv.getUint32(q), spc: mdv.getUint32(q + 4) });
+    }
+
+    const co = [];
+    if (stco32) {
+      const nc = mdv.getUint32(stco32.start + 12);
+      for (let c = 0; c < nc; c++) co.push(mdv.getUint32(stco32.start + 16 + c * 4));
+    } else {
+      const nc = mdv.getUint32(co64.start + 12);
+      for (let c = 0; c < nc; c++) co.push(Number(mdv.getBigUint64(co64.start + 16 + c * 8)));
+    }
+
+    const offsets = [];
+    let s = 0;
+    let ri = 0;
+    for (let c = 0; c < co.length; c++) {
+      while (ri + 1 < runs.length && runs.at(ri + 1).first <= c + 1) ri++;
+      let off = co.at(c);
+      const spc = runs.at(ri).spc;
+      for (let k = 0; k < spc && s < n; k++) {
+        offsets.push(off);
+        off += sizes.at(s);
+        s++;
+      }
+    }
+
+    let syncSet = null;
+    if (stss) {
+      syncSet = new Set();
+      const ns = mdv.getUint32(stss.start + 12);
+      for (let i = 0; i < ns; i++) syncSet.add(mdv.getUint32(stss.start + 16 + i * 4) - 1);
+    }
+
+    let cts = null;
+    let cttsVer = 0;
+    if (ctts) {
+      cts = [];
+      cttsVer = mdv.getUint8(ctts.start + 8);
+      const nCt = mdv.getUint32(ctts.start + 12);
+      let q = ctts.start + 16;
+      for (let e = 0; e < nCt; e++) {
+        const c = mdv.getUint32(q);
+        const o = mdv.getInt32(q + 4);
+        for (let k = 0; k < c; k++) cts.push(o);
+        q += 8;
+      }
+    }
+
+    const dts = [];
+    let t = 0;
+    deltas.forEach(function (d) { dts.push(t); t += d; });
+
+    return { trak: trak, kind: kind, ts: ts, n: n, sizes: sizes, deltas: deltas, dts: dts, offsets: offsets, syncSet: syncSet, cts: cts, cttsVer: cttsVer, totalTicks: t, bounds: [] };
+  }
+
+  async function planQuickSplit(file, chunkSec) {
+    const top = await readTopBoxes(file);
+    const moovTop = top.find(function (b) { return b.type === 'moov'; });
+    const ftypTop = top.find(function (b) { return b.type === 'ftyp'; });
+    if (!moovTop) throw new Error('Is file mein MP4 info (moov) nahi mili. Quick Split sirf MP4/MOV par chalta hai.');
+    if (top.some(function (b) { return b.type === 'moof'; })) throw new Error('Fragmented MP4 support nahi hai.');
+
+    const mb = new Uint8Array(await file.slice(moovTop.start, moovTop.start + moovTop.size).arrayBuffer());
+    const mdv = new DataView(mb.buffer);
+    const moovBox = { type: 'moov', start: 0, end: mb.length };
+    const ftyp = ftypTop
+      ? new Uint8Array(await file.slice(ftypTop.start, ftypTop.start + ftypTop.size).arrayBuffer())
+      : mk('ftyp', [u32s([0x69736F6D, 0x200, 0x69736F6D])]);
+
+    const kids = parseBoxes(mdv, 8, mb.length);
+    if (kids.some(function (b) { return b.type === 'mvex'; })) throw new Error('Fragmented MP4 support nahi hai.');
+    const mvhd = child(mdv, moovBox, 'mvhd');
+    if (!mvhd) throw new Error('mvhd missing.');
+    const movieTs = mdv.getUint32(mvhd.start + 8 + (mdv.getUint8(mvhd.start + 8) === 1 ? 20 : 12));
+
+    const tracks = [];
+    kids.filter(function (b) { return b.type === 'trak'; }).forEach(function (trak) {
+      const tr = readTrack(mdv, trak);
+      if (tr) tracks.push(tr);
+    });
+    const v = tracks.find(function (t) { return t.kind === 'vide'; });
+    if (!v || v.n === 0) throw new Error('Video track nahi mila.');
+
+    const kfs = [];
+    for (let i = 0; i < v.n; i++) if (!v.syncSet || v.syncSet.has(i)) kfs.push(i);
+    if (kfs.length === 0) throw new Error('Keyframes nahi mile.');
+
+    const vDur = v.totalTicks / v.ts;
+    const starts = [];
+    let j = 0;
+    for (let t = 0; t < vDur; t += chunkSec) {
+      while (j + 1 < kfs.length && v.dts.at(kfs.at(j + 1)) / v.ts <= t + 0.001) j++;
+      const idx = kfs.at(j);
+      if (starts.length === 0 || idx > starts.at(starts.length - 1)) starts.push(idx);
+    }
+
+    tracks.forEach(function (tr) {
+      let ptr = 0;
+      starts.forEach(function (si, k) {
+        if (tr === v) { tr.bounds.push(si); return; }
+        const T = k === 0 ? 0 : v.dts.at(si) / v.ts;
+        while (ptr < tr.n && tr.dts.at(ptr) / tr.ts < T - 0.0005) ptr++;
+        tr.bounds.push(ptr);
+      });
+    });
+
+    function makeClip(k) {
+      const info = [];
+      const byStart = new Map();
+      const slices = [];
+      let cursor = 0;
+      let movieDur = 0;
+
+      tracks.forEach(function (tr) {
+        const a = tr.bounds.at(k);
+        const b = k + 1 < starts.length ? tr.bounds.at(k + 1) : tr.n;
+        const x = { tr: tr, sizes: [], deltas: [], cts: tr.cts ? [] : null, sync: [], offs: [], ticks: 0, firstCts: 0 };
+        for (let i = a; i < b; i++) {
+          const sz = tr.sizes.at(i);
+          const so = tr.offsets.at(i);
+          x.sizes.push(sz);
+          x.deltas.push(tr.deltas.at(i));
+          x.ticks += tr.deltas.at(i);
+          if (x.cts) x.cts.push(tr.cts.at(i));
+          if (tr.syncSet && tr.syncSet.has(i)) x.sync.push(i - a + 1);
+          x.offs.push(cursor);
+          const last = slices.length > 0 ? slices.at(slices.length - 1) : null;
+          if (last && last.end === so) last.end = so + sz;
+          else slices.push({ start: so, end: so + sz });
+          cursor += sz;
+        }
+        x.firstCts = x.cts && x.cts.length > 0 ? x.cts.at(0) : 0;
+        movieDur = Math.max(movieDur, Math.round(x.ticks / tr.ts * movieTs));
+        info.push(x);
+        byStart.set(tr.trak.start, x);
+      });
+
+      function buildMoov(base) {
+        let cur = null;
+        function ser(box) {
+          const t = box.type;
+          if (t === 'moov' || t === 'mdia' || t === 'minf') {
+            const ks = parseBoxes(mdv, box.start + 8, box.end).filter(function (kb) {
+              return kb.type !== 'trak' || byStart.has(kb.start);
+            });
+            return mk(t, ks.map(function (kb) { return ser(kb); }));
+          }
+          if (t === 'trak') {
+            cur = byStart.get(box.start);
+            const parts = [];
+            parseBoxes(mdv, box.start + 8, box.end).forEach(function (kb) {
+              if (kb.type === 'edts') return;
+              parts.push(ser(kb));
+              if (kb.type === 'tkhd' && cur.tr.kind === 'vide' && cur.firstCts > 0) {
+                const segDur = Math.round(cur.ticks / cur.tr.ts * movieTs);
+                parts.push(mk('edts', [mk('elst', [u32s([0, 1, segDur, cur.firstCts, 0x10000])])]));
+              }
+            });
+            return mk('trak', parts);
+          }
+          if (t === 'mvhd' || t === 'tkhd' || t === 'mdhd') {
+            const c = mb.slice(box.start, box.end);
+            const dv = new DataView(c.buffer);
+            const ver = dv.getUint8(8);
+            let off;
+            let dur;
+            if (t === 'mvhd') { off = 8 + (ver === 1 ? 24 : 16); dur = movieDur; }
+            else if (t === 'tkhd') { off = 8 + (ver === 1 ? 32 : 20); dur = Math.round(cur.ticks / cur.tr.ts * movieTs); }
+            else { off = 8 + (ver === 1 ? 24 : 16); dur = cur.ticks; }
+            if (ver === 1) {
+              dv.setUint32(off, Math.floor(dur / 4294967296));
+              dv.setUint32(off + 4, dur % 4294967296);
+            } else {
+              dv.setUint32(off, dur);
+            }
+            return c;
+          }
+          if (t === 'stbl') {
+            const stsd = child(mdv, box, 'stsd');
+            const parts = [mb.slice(stsd.start, stsd.end)];
+            const sr = rle(cur.deltas);
+            parts.push(mk('stts', [u32s([0, sr.length / 2]), u32s(sr)]));
+            if (cur.cts) {
+              const cr = rle(cur.cts);
+              parts.push(mk('ctts', [u32s([cur.tr.cttsVer * 16777216, cr.length / 2]), u32s(cr)]));
+            }
+            if (cur.tr.syncSet) parts.push(mk('stss', [u32s([0, cur.sync.length]), u32s(cur.sync)]));
+            parts.push(mk('stsc', [u32s([0, 1, 1, 1, 1])]));
+            parts.push(mk('stsz', [u32s([0, 0, cur.sizes.length]), u32s(cur.sizes)]));
+            const abs = [];
+            cur.offs.forEach(function (o) { abs.push(o + base); });
+            parts.push(mk('stco', [u32s([0, abs.length]), u32s(abs)]));
+            return mk('stbl', parts);
+          }
+          return mb.slice(box.start, box.end);
+        }
+        return ser(moovBox);
+      }
+
+      if (cursor + 8 > 4294967295) throw new Error('Clip 4GB se bara hai. Chhota split interval chunein.');
+      const moov0 = buildMoov(0);
+      const dataStart = ftyp.length + moov0.length + 8;
+      const moov = buildMoov(dataStart);
+      const head = new Uint8Array(8);
+      const hdv = new DataView(head.buffer);
+      hdv.setUint32(0, cursor + 8);
+      'mdat'.split('').forEach(function (ch, i) { hdv.setUint8(4 + i, ch.charCodeAt(0)); });
+
+      const blobParts = [ftyp, moov, head];
+      slices.forEach(function (sl) { blobParts.push(file.slice(sl.start, sl.end)); });
+      return { blob: new Blob(blobParts, { type: 'video/mp4' }), duration: movieDur / movieTs };
+    }
+
+    return { count: starts.length, makeClip: makeClip };
+  }
+  /* QS-END */
+
+  quickBtn.addEventListener('click', async function () {
+    if (!selectedFile || isRunning) return;
+    const chunkSec = getChunkSeconds();
+    if (chunkSec <= 0) {
+      setStatus('Split value 0 se zyada honi chahiye.', 'err');
+      return;
+    }
+    isRunning = true;
+    isCancelled = false;
+    splitBtn.disabled = true;
+    quickBtn.disabled = true;
+    fileInput.disabled = true;
+    stopBtn.style.display = 'inline-block';
+    downloadsList.innerHTML = '';
+    resultPanel.style.display = 'none';
+    barFill.style.width = '0%';
+    previewVideo.pause();
+    try {
+      setStatus('Quick Split: file analyze ho rahi hai...', 'work');
+      const plan = await planQuickSplit(selectedFile, chunkSec);
+      let made = 0;
+      for (let k = 0; k < plan.count; k++) {
+        if (isCancelled) break;
+        setStatus('Quick Split: clip ' + (k + 1) + ' of ' + plan.count + ' ban rahi hai...', 'work');
+        const res = plan.makeClip(k);
+        const name = 'part_' + String(k + 1).padStart(3, '0') + '_original.mp4';
+        const url = URL.createObjectURL(res.blob);
+        const dlBtn = addDownload(res.blob, url, name, res.duration);
+        if (autoDl.checked) {
+          const where = await saveClip(res.blob, url, name);
+          if (where === 'folder') dlBtn.innerText = 'Saved \u2713';
+        }
+        made++;
+        barFill.style.width = (((k + 1) / plan.count) * 100).toFixed(1) + '%';
+        await new Promise(function (r) { setTimeout(r, 0); });
+      }
+      if (!isCancelled) {
+        let msg = 'Quick Split mukammal! ' + made + ' clips ready hain. ' + (autoDl.checked ? 'Auto save ho chuki hain.' : 'Neeche Preview ya Download button use karein.');
+        if (aspectRatio.value !== 'original') msg += ' (Quick Split mein aspect ratio Original hi rehta hai.)';
+        setStatus(msg, 'ok');
+      }
+    } catch (err) {
+      setStatus('Quick Split error: ' + (err && err.message ? err.message : 'fail') + ' Normal Auto Split try karein.', 'err');
+    } finally {
+      isRunning = false;
+      fileInput.disabled = false;
+      stopBtn.style.display = 'none';
+      splitBtn.disabled = !videoReady;
+      quickBtn.disabled = !selectedFile;
+    }
+  });
+
   /* Audio: split ke dauran awaaz speakers mein nahi aati, lekin clips mein record hoti hai */
   function setupAudio() {
     if (audioCtx) return;
@@ -470,20 +904,99 @@
     return '';
   }
 
-  function addDownload(url, name, secs) {
+  function openPreview(url, name) {
+    modalTitle.innerText = name;
+    modalVideo.src = url;
+    modal.style.display = 'flex';
+    const p = modalVideo.play();
+    if (p && p.catch) p.catch(function () {});
+  }
+
+  function closePreview() {
+    modalVideo.pause();
+    modalVideo.removeAttribute('src');
+    modalVideo.load();
+    modal.style.display = 'none';
+  }
+
+  modalClose.addEventListener('click', closePreview);
+  modal.addEventListener('click', function (e) { if (e.target === modal) closePreview(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && modal.style.display === 'flex') closePreview(); });
+
+  async function writeToFolder(blob, name) {
+    const fh = await dirHandle.getFileHandle(name, { create: true });
+    const w = await fh.createWritable();
+    await w.write(blob);
+    await w.close();
+  }
+
+  function resetFolder(msg) {
+    dirHandle = null;
+    clearFolderBtn.style.display = 'none';
+    folderLabel.innerText = msg || 'Folder select nahi hai: normal browser download hogi.';
+  }
+
+  async function saveClip(blob, url, name) {
+    if (dirHandle) {
+      try {
+        await writeToFolder(blob, name);
+        return 'folder';
+      } catch (err) {
+        resetFolder('Folder mein save nahi ho saka, ab normal browser download use hogi.');
+      }
+    }
+    autoDownload(url, name);
+    return 'download';
+  }
+
+  pickFolderBtn.addEventListener('click', async function () {
+    if (!window.showDirectoryPicker) {
+      folderLabel.innerText = 'Folder select sirf desktop Chrome ya Edge mein chalta hai. Yahan normal download hogi.';
+      return;
+    }
+    try {
+      dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+      clearFolderBtn.style.display = 'inline-block';
+      folderLabel.innerText = 'Save folder: ' + dirHandle.name + ' (clips isi mein save hongi)';
+    } catch (err) {
+      /* user ne cancel kar diya */
+    }
+  });
+
+  clearFolderBtn.addEventListener('click', function () { resetFolder(); });
+
+  function addDownload(blob, url, name, secs) {
     resultPanel.style.display = 'block';
     const div = document.createElement('div');
     div.className = 'dl-item';
+
     const span = document.createElement('span');
-    span.innerText = name + ' (' + Math.round(secs) + 's)';
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = name;
-    a.className = 'dl-btn';
-    a.innerText = 'Download';
+    span.innerText = name + ' (' + Math.round(secs) + 's, ' + (blob.size / 1048576).toFixed(1) + ' MB)';
+
+    const btns = document.createElement('div');
+    btns.className = 'dl-btns';
+
+    const pv = document.createElement('button');
+    pv.type = 'button';
+    pv.className = 'dl-btn alt';
+    pv.innerText = 'Preview';
+    pv.addEventListener('click', function () { openPreview(url, name); });
+
+    const dl = document.createElement('button');
+    dl.type = 'button';
+    dl.className = 'dl-btn';
+    dl.innerText = 'Download';
+    dl.addEventListener('click', async function () {
+      const where = await saveClip(blob, url, name);
+      dl.innerText = (where === 'folder') ? 'Saved \u2713' : 'Download';
+    });
+
+    btns.appendChild(pv);
+    btns.appendChild(dl);
     div.appendChild(span);
-    div.appendChild(a);
+    div.appendChild(btns);
     downloadsList.appendChild(div);
+    return dl;
   }
 
   function autoDownload(url, name) {
@@ -526,6 +1039,7 @@
     isRunning = true;
     isCancelled = false;
     splitBtn.disabled = true;
+    quickBtn.disabled = true;
     fileInput.disabled = true;
     stopBtn.style.display = 'inline-block';
     pauseSplitBtn.style.display = 'inline-block';
@@ -619,15 +1133,18 @@
           const name = 'part_' + String(i + 1).padStart(3, '0') + '_' + ratioName + '.' + ext;
           const blob = new Blob(chunks, { type: mimeType });
           const url = URL.createObjectURL(blob);
-          autoDownload(url, name);
-          addDownload(url, name, endTime - startTime);
+          const dlBtn = addDownload(blob, url, name, endTime - startTime);
+          if (autoDl.checked) {
+            const where = await saveClip(blob, url, name);
+            if (where === 'folder') dlBtn.innerText = 'Saved \u2713';
+          }
           markSegment(i, 'done');
         }
       }
 
       if (!isCancelled) {
         barFill.style.width = '100%';
-        setStatus('Mukammal! Total ' + totalParts + ' clips export ho gayi hain. Agar koi download nahi hui to neeche Download button use karein.', 'ok');
+        setStatus('Mukammal! ' + totalParts + ' clips ready hain. ' + (autoDl.checked ? 'Auto save ho chuki hain.' : 'Neeche Preview ya Download button use karein.'), 'ok');
       }
     } catch (err) {
       setStatus('Error: ' + (err && err.message ? err.message : 'splitting fail ho gayi'), 'err');
@@ -645,6 +1162,7 @@
       partEnding = false;
       updatePlayUI();
       splitBtn.disabled = !videoReady;
+      quickBtn.disabled = !selectedFile;
     }
   });
 </script>
