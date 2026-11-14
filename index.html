@@ -189,13 +189,17 @@
     <div class="actions">
       <button class="btn primary" id="splitBtn" disabled>Auto Split and Export</button>
       <button class="btn" id="quickBtn" disabled>Quick Split (Fast)</button>
+      <select id="quickMode" aria-label="Quick Split mode" style="width:auto;">
+        <option value="exact">Exact seconds + ratio</option>
+        <option value="instant">Instant (keyframe cut, no crop)</option>
+      </select>
       <button class="btn" id="pauseSplitBtn" style="display:none;">Pause Splitting</button>
       <button class="btn danger" id="stopBtn" style="display:none;">Stop Splitting</button>
     </div>
 
     <div class="bar"><div id="barFill"></div></div>
     <p id="status">Pehle video select karein.</p>
-    <p class="hint">Split ke dauran video pause karein to splitting bhi ruk jati hai, aur dobara play karne par wahin se continue hoti hai. Is tab ko open aur visible rakhein. Auto Split clips real-time mein record karta hai (aspect ratio crop ke saath). Quick Split bina play kiye clips banata hai: upar di gayi seconds aur aspect ratio dono apply hoti hain (H.264 MP4/MOV, Chrome ya Edge). Speed aapke PC ke video encoder par depend karti hai, aam taur par real-time se kai guna tez. Agar browser support na kare to ye sirf keyframe par lossless cut karta hai (lengths upar neeche, ratio Original).</p>
+    <p class="hint">Split ke dauran video pause karein to splitting bhi ruk jati hai, aur dobara play karne par wahin se continue hoti hai. Is tab ko open aur visible rakhein. Auto Split clips real-time mein record karta hai (aspect ratio crop ke saath). Quick Split bina play kiye clips banata hai. Mode 'Exact' mein seconds aur aspect ratio dono apply hoti hain (har frame hardware encoder se guzarta hai, to speed PC par depend karti hai; status mein asli speed dikhti hai). Mode 'Instant' lossless keyframe cut karta hai: bijli jaisa tez, lekin lengths 1-8 sec upar neeche ho sakti hain aur ratio Original rehta hai. Dono H.264 MP4/MOV ke liye hain.</p>
   </div>
 
   <div class="panel" id="resultPanel" style="display:none;">
@@ -248,6 +252,7 @@
   const timeText = document.getElementById('timeText');
   const pauseSplitBtn = document.getElementById('pauseSplitBtn');
   const quickBtn = document.getElementById('quickBtn');
+  const quickMode = document.getElementById('quickMode');
   let partEnding = false;
   let currentPart = 0;
   let totalPartsRun = 0;
@@ -826,6 +831,7 @@
         });
       });
       return {
+        duration: vDur,
         count: starts.length,
         makeClip: async function (k) {
           return assemble(function (tr) {
@@ -866,6 +872,7 @@
 
     const count = Math.max(1, Math.ceil(vDur / chunkSec - 0.0001));
     return {
+      duration: vDur,
       count: count,
       makeClip: async function (k) {
         const t0 = k * chunkSec;
@@ -936,17 +943,31 @@
     if (mbs <= 3600 && mbps <= 108000) lvl = '1f';
     else if (mbs <= 8192 && mbps <= 245760) lvl = '28';
     else if (mbs <= 8704 && mbps <= 522240) lvl = '2a';
-    for (const pr of ['6400', '4d00', '4200']) {
-      const cfg = { codec: 'avc1.' + pr + lvl, width: cw, height: ch, bitrate: bitrate, framerate: Math.round(fps), avc: { format: 'avc' }, latencyMode: 'realtime' };
-      try {
-        const r = await VideoEncoder.isConfigSupported(cfg);
-        if (r && r.supported) return cfg;
-      } catch (err) {}
+    for (const hw of ['prefer-hardware', 'no-preference']) {
+      for (const pr of ['6400', '4d00', '4200']) {
+        const cfg = { codec: 'avc1.' + pr + lvl, width: cw, height: ch, bitrate: bitrate, framerate: Math.round(fps), avc: { format: 'avc' }, latencyMode: 'realtime', hardwareAcceleration: hw };
+        try {
+          const r = await VideoEncoder.isConfigSupported(cfg);
+          if (r && r.supported) return cfg;
+        } catch (err) {}
+      }
     }
     throw new Error('Browser H.264 encoder support nahi karta.');
   }
 
-  function sleepMs(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function waitDequeue(obj) {
+    return new Promise(function (resolve) {
+      let done = false;
+      function fin() {
+        if (done) return;
+        done = true;
+        obj.removeEventListener('dequeue', fin);
+        resolve();
+      }
+      obj.addEventListener('dequeue', fin);
+      setTimeout(fin, 25);
+    });
+  }
 
   async function realEncode(t0, t1, ctx, encCfg, fps, kfs) {
     const v = ctx.v;
@@ -1023,7 +1044,9 @@
         timestamp: ptsUs(i),
         data: block.subarray(off, off + v.sizes.at(i))
       }));
-      while ((decoder.decodeQueueSize > 8 || encoder.encodeQueueSize > 8) && !failure) await sleepMs(2);
+      while (!failure && (decoder.decodeQueueSize > 16 || encoder.encodeQueueSize > 16)) {
+        await waitDequeue(decoder.decodeQueueSize > 16 ? decoder : encoder);
+      }
     }
     if (!failure) {
       await decoder.flush();
@@ -1035,6 +1058,52 @@
     if (!desc) throw new Error('Encoder ne config nahi di.');
     return { chunks: out, description: desc, width: crop.w, height: crop.h };
   }
+  /* Parallel runner: clips ek saath banti hain, lekin list mein tarteeb se add hoti hain */
+  async function runPool(startK, count, workers, makeClip, onResult, shouldStop) {
+    const results = new Map();
+    const failed = [];
+    let nextStart = startK;
+    let nextToAdd = startK;
+    let chain = Promise.resolve();
+
+    function flush() {
+      chain = chain.then(async function () {
+        while (results.has(nextToAdd)) {
+          const r = results.get(nextToAdd);
+          results.delete(nextToAdd);
+          await onResult(nextToAdd, r);
+          nextToAdd++;
+        }
+      });
+      return chain;
+    }
+
+    async function worker() {
+      while (!shouldStop()) {
+        const k = nextStart;
+        if (k >= count) return;
+        nextStart++;
+        try {
+          results.set(k, await makeClip(k));
+          await flush();
+        } catch (err) {
+          failed.push(k);
+        }
+      }
+    }
+
+    const list = [];
+    for (let i = 0; i < Math.max(1, workers); i++) list.push(worker());
+    await Promise.all(list);
+    failed.sort(function (a, b) { return a - b; });
+    for (const k of failed) {
+      if (shouldStop()) break;
+      results.set(k, await makeClip(k));
+      await flush();
+    }
+    await flush();
+    return nextToAdd;
+  }
   /* QS-END */
 
   quickBtn.addEventListener('click', async function () {
@@ -1045,10 +1114,12 @@
       return;
     }
     const ratioVal = aspectRatio.value;
+    const wantExact = quickMode.value === 'exact';
     isRunning = true;
     isCancelled = false;
     splitBtn.disabled = true;
     quickBtn.disabled = true;
+    quickMode.disabled = true;
     fileInput.disabled = true;
     stopBtn.style.display = 'inline-block';
     downloadsList.innerHTML = '';
@@ -1060,36 +1131,26 @@
     try {
       setStatus('Quick Split: file analyze ho rahi hai...', 'work');
       let plan = null;
-      if (typeof VideoDecoder !== 'undefined' && typeof VideoEncoder !== 'undefined') {
-        try {
-          plan = await planQuickSplit(selectedFile, chunkSec, { exact: true, ratio: ratioVal });
-          exactMode = true;
-        } catch (err) {
-          note = ' Exact mode nahi chal saka (' + (err && err.message ? err.message : 'error') + '), keyframe cut use hua.';
+      if (wantExact) {
+        if (typeof VideoDecoder !== 'undefined' && typeof VideoEncoder !== 'undefined') {
+          try {
+            plan = await planQuickSplit(selectedFile, chunkSec, { exact: true, ratio: ratioVal });
+            exactMode = true;
+          } catch (err) {
+            note = ' Exact mode nahi chal saka (' + (err && err.message ? err.message : 'error') + '), keyframe cut use hua.';
+          }
+        } else {
+          note = ' Is browser mein WebCodecs nahi hai (Chrome ya Edge use karein), keyframe cut use hua.';
         }
-      } else {
-        note = ' Is browser mein WebCodecs nahi hai (Chrome ya Edge use karein), keyframe cut use hua.';
       }
       if (!plan) plan = await planQuickSplit(selectedFile, chunkSec);
 
+      const workers = exactMode ? Math.max(2, Math.min(4, Math.floor((navigator.hardwareConcurrency || 4) / 2))) : 1;
+      const startedAt = performance.now();
+      let doneSec = 0;
       let made = 0;
-      let k = 0;
-      while (k < plan.count) {
-        if (isCancelled) break;
-        setStatus('Quick Split: clip ' + (k + 1) + ' of ' + plan.count + (exactMode ? ' encode ho rahi hai (' + ratioVal + ')...' : ' ban rahi hai...'), 'work');
-        let res;
-        try {
-          res = await plan.makeClip(k);
-        } catch (err) {
-          if (exactMode && made === 0) {
-            exactMode = false;
-            note = ' Exact mode fail hua (' + (err && err.message ? err.message : 'error') + '), keyframe cut use hua.';
-            plan = await planQuickSplit(selectedFile, chunkSec);
-            k = 0;
-            continue;
-          }
-          throw err;
-        }
+
+      async function addResult(k, res) {
         const name = 'part_' + String(k + 1).padStart(3, '0') + '_' + (exactMode ? ratioVal.replace(':', 'x') : 'original') + '.mp4';
         const url = URL.createObjectURL(res.blob);
         const dlBtn = addDownload(res.blob, url, name, res.duration);
@@ -1098,23 +1159,43 @@
           if (where === 'folder') dlBtn.innerText = 'Saved \u2713';
         }
         made++;
-        k++;
-        barFill.style.width = ((k / plan.count) * 100).toFixed(1) + '%';
-        await new Promise(function (r) { setTimeout(r, 0); });
+        doneSec += res.duration;
+        barFill.style.width = ((made / plan.count) * 100).toFixed(1) + '%';
+        const elapsed = Math.max(0.1, (performance.now() - startedAt) / 1000);
+        const speed = doneSec / elapsed;
+        const eta = Math.max(0, (plan.duration - doneSec) / Math.max(speed, 0.01));
+        setStatus('Quick Split: ' + made + ' of ' + plan.count + ' clips ready | speed ' + speed.toFixed(1) + 'x | baqi ~' + Math.ceil(eta) + ' sec' + (exactMode ? ' | ' + workers + ' parallel' : ''), 'work');
       }
+
+      setStatus('Quick Split: pehli clip ban rahi hai' + (exactMode ? ' (' + ratioVal + ')' : '') + '...', 'work');
+      let first;
+      try {
+        first = await plan.makeClip(0);
+      } catch (err) {
+        if (!exactMode) throw err;
+        exactMode = false;
+        note = ' Exact mode fail hua (' + (err && err.message ? err.message : 'error') + '), keyframe cut use hua.';
+        plan = await planQuickSplit(selectedFile, chunkSec);
+        first = await plan.makeClip(0);
+      }
+      await addResult(0, first);
+      await runPool(1, plan.count, exactMode ? workers : 1, plan.makeClip, addResult, function () { return isCancelled; });
+
       if (!isCancelled) {
-        let msg = 'Quick Split mukammal! ' + made + ' clips ready hain';
+        const total = ((performance.now() - startedAt) / 1000).toFixed(1);
+        let msg = 'Quick Split mukammal! ' + made + ' clips ' + total + ' sec mein ready hain';
         msg += exactMode ? ' (har clip ' + chunkSec + ' sec, ratio ' + ratioVal + '). ' : '. ';
         msg += autoDl.checked ? 'Auto save ho chuki hain.' : 'Neeche Preview ya Download button use karein.';
         if (!exactMode && ratioVal !== 'original') msg += ' Aspect ratio apply nahi hui.';
         msg += note;
-        setStatus(msg, exactMode ? 'ok' : 'work');
+        setStatus(msg, exactMode || !wantExact ? 'ok' : 'work');
       }
     } catch (err) {
       setStatus('Quick Split error: ' + (err && err.message ? err.message : 'fail') + ' Normal Auto Split try karein.', 'err');
     } finally {
       isRunning = false;
       fileInput.disabled = false;
+      quickMode.disabled = false;
       stopBtn.style.display = 'none';
       splitBtn.disabled = !videoReady;
       quickBtn.disabled = !selectedFile;
