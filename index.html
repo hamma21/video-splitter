@@ -120,6 +120,10 @@
   }
   .dl-btn { background: var(--accent); color: var(--accent-ink); padding: 6px 12px; border-radius: 6px; text-decoration: none; font-weight: 600; white-space: nowrap; }
   .topbar { margin: -8px 0 16px; }
+  .rotRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin-top: 12px; }
+  .rotRow .btn { padding: 8px 12px; font-size: 14px; }
+  .rotRow input { width: 84px; }
+  .rotLabel { color: var(--muted); font-size: 14px; }
 </style>
 </head>
 <body>
@@ -151,6 +155,15 @@
       </div>
     </div>
     <p class="frameNote" id="frameNote"></p>
+    <div class="rotRow">
+      <span class="rotLabel">Rotate:</span>
+      <button class="btn" id="rotL" type="button">&#8634; 90&deg;</button>
+      <button class="btn" id="rotR" type="button">&#8635; 90&deg;</button>
+      <button class="btn" id="rot180" type="button">180&deg;</button>
+      <input type="number" id="rotDeg" value="0" min="0" max="359" step="1" aria-label="Rotation degrees (clockwise)">
+      <span class="rotLabel">&deg;</span>
+      <button class="btn" id="rotReset" type="button">Reset</button>
+    </div>
     <div class="timeline" id="timeline"></div>
   </div>
 
@@ -202,7 +215,7 @@
 
     <div class="bar"><div id="barFill"></div></div>
     <p id="status">Pehle video select karein.</p>
-    <p class="hint">Split ke dauran video pause karein to splitting bhi ruk jati hai, aur dobara play karne par wahin se continue hoti hai. Is tab ko open aur visible rakhein. Auto Split ab by default fast engine (hardware encoder, parallel clips) use karta hai. Live mode on karein to video play hote hue real-time record hoti hai (slow, lekin preview aur pause kaam karte hain). Quick Split bina play kiye clips banata hai. Mode 'Exact' mein seconds aur aspect ratio dono apply hoti hain (har frame hardware encoder se guzarta hai, to speed PC par depend karti hai; status mein asli speed dikhti hai). Mode 'Instant' lossless keyframe cut karta hai: bijli jaisa tez, lekin lengths 1-8 sec upar neeche ho sakti hain aur ratio Original rehta hai. Dono H.264 MP4/MOV ke liye hain.</p>
+    <p class="hint">Split ke dauran video pause karein to splitting bhi ruk jati hai, aur dobara play karne par wahin se continue hoti hai. Is tab ko open aur visible rakhein. Auto Split ab by default fast engine (hardware encoder, parallel clips) use karta hai. Live mode on karein to video play hote hue real-time record hoti hai (slow, lekin preview aur pause kaam karte hain). Quick Split bina play kiye clips banata hai. Mode 'Exact' mein seconds aur aspect ratio dono apply hoti hain (har frame hardware encoder se guzarta hai, to speed PC par depend karti hai; status mein asli speed dikhti hai). Rotate buttons video ko kisi bhi degree par ghumate hain (Instant mode sirf 90/180/270 par chalta hai, custom degree ke liye Exact use hota hai). Mode 'Instant' lossless keyframe cut karta hai: bijli jaisa tez, lekin lengths 1-8 sec upar neeche ho sakti hain aur ratio Original rehta hai. Dono H.264 MP4/MOV ke liye hain.</p>
   </div>
 
   <div class="panel" id="resultPanel" style="display:none;">
@@ -257,6 +270,7 @@
   const quickBtn = document.getElementById('quickBtn');
   const quickMode = document.getElementById('quickMode');
   const liveMode = document.getElementById('liveMode');
+  const rotInput = document.getElementById('rotDeg');
   const removeBtn = document.getElementById('removeBtn');
   let runToken = 0;
   let partEnding = false;
@@ -312,6 +326,68 @@
     return { sx: Math.round((vw - w) / 2), sy: Math.round((vh - h) / 2), w: w, h: h };
   }
 
+  function getRot() {
+    const v = parseFloat(rotInput.value);
+    const n = isFinite(v) ? Math.round(v) : 0;
+    return ((n % 360) + 360) % 360;
+  }
+
+  function rotLayout(vw, vh, ratioVal, deg) {
+    const odd = Math.abs(deg % 180) === 90;
+    const base = cropFor(odd ? vh : vw, odd ? vw : vh, ratioVal);
+    const rad = deg * Math.PI / 180;
+    const ac = Math.abs(Math.cos(rad));
+    const as = Math.abs(Math.sin(rad));
+    const k = Math.max(1, (base.w * ac + base.h * as) / vw, (base.w * as + base.h * ac) / vh);
+    return { w: base.w, h: base.h, k: k, rad: rad };
+  }
+
+  function applyPreviewRotation() {
+    const deg = getRot();
+    const st = previewVideo.style;
+    if (!videoReady || deg === 0) {
+      st.position = '';
+      st.left = '';
+      st.top = '';
+      st.width = '';
+      st.height = '';
+      st.transform = '';
+      return;
+    }
+    const vw = previewVideo.videoWidth;
+    const vh = previewVideo.videoHeight;
+    const L = rotLayout(vw, vh, aspectRatio.value, deg);
+    player.style.aspectRatio = L.w + ' / ' + L.h;
+    player.style.maxWidth = (L.w < L.h) ? '300px' : '100%';
+    const c = Math.max(player.clientWidth / L.w, player.clientHeight / L.h);
+    const kc = L.k * c;
+    st.position = 'absolute';
+    st.left = '50%';
+    st.top = '50%';
+    st.width = (vw * kc) + 'px';
+    st.height = (vh * kc) + 'px';
+    st.transform = 'translate(-50%, -50%) rotate(' + deg + 'deg)';
+    frameNote.innerText = 'Rotation: ' + deg + '\u00B0 (clockwise). Preview mein wahi dikh raha hai jo export hoga.';
+  }
+
+  function onRotChange() {
+    if (!isRunning) updateFrame();
+  }
+
+  function setRot(n) {
+    if (isRunning) return;
+    rotInput.value = ((Math.round(n) % 360) + 360) % 360;
+    onRotChange();
+  }
+
+  document.getElementById('rotL').addEventListener('click', function () { setRot(getRot() - 90); });
+  document.getElementById('rotR').addEventListener('click', function () { setRot(getRot() + 90); });
+  document.getElementById('rot180').addEventListener('click', function () { setRot(getRot() + 180); });
+  document.getElementById('rotReset').addEventListener('click', function () { setRot(0); });
+  rotInput.addEventListener('input', onRotChange);
+  rotInput.addEventListener('change', function () { setRot(getRot()); });
+  window.addEventListener('resize', function () { if (!isRunning) applyPreviewRotation(); });
+
   function updateFrame() {
     if (!videoReady) return;
     const a = aspectRatio.value;
@@ -325,6 +401,7 @@
       frameNote.innerText = 'Preview mein wahi hissa dikh raha hai jo export hoga (center crop, ' + a + ')';
     }
     player.style.maxWidth = (a === '9:16') ? '300px' : '100%';
+    applyPreviewRotation();
   }
 
   function buildTimeline() {
@@ -382,6 +459,7 @@
     player.style.maxWidth = '100%';
     resetVideoState();
     removeBtn.style.display = 'none';
+    rotInput.value = 0;
     splitBtn.disabled = true;
     quickBtn.disabled = true;
     setStatus('Pehle video select karein.', '');
@@ -716,6 +794,17 @@
     if (kfs.length === 0) throw new Error('Keyframes nahi mile.');
 
     const vDur = v.totalTicks / v.ts;
+    const vTkhd = child(mdv, v.trak, 'tkhd');
+    const mOff = vTkhd.start + 8 + (mdv.getUint8(vTkhd.start + 8) === 1 ? 52 : 40);
+    const mA = mdv.getInt32(mOff) / 65536;
+    const mB = mdv.getInt32(mOff + 4) / 65536;
+    const mC = mdv.getInt32(mOff + 12) / 65536;
+    const mD = mdv.getInt32(mOff + 16) / 65536;
+    let baseRot = 0;
+    if (mA === 0 && mB === 1 && mC === -1 && mD === 0) baseRot = 90;
+    else if (mA === -1 && mB === 0 && mC === 0 && mD === -1) baseRot = 180;
+    else if (mA === 0 && mB === -1 && mC === 1 && mD === 0) baseRot = 270;
+    const userRot = (((Math.round(opts.rotate || 0) % 360) + 360) % 360);
 
     function assemble(rangeFn, ov) {
       const info = [];
@@ -725,11 +814,12 @@
       let movieDur = 0;
 
       tracks.forEach(function (tr) {
-        const x = { tr: tr, sizes: [], deltas: [], cts: tr.cts ? [] : null, sync: [], offs: [], ticks: 0, firstCts: 0, stsd: null, dims: null, forceStss: false };
+        const x = { tr: tr, sizes: [], deltas: [], cts: tr.cts ? [] : null, sync: [], offs: [], ticks: 0, firstCts: 0, stsd: null, dims: null, forceStss: false, matrixRot: null };
         if (ov && tr === v) {
           x.cts = null;
           x.stsd = ov.stsd;
           x.dims = { w: ov.width, h: ov.height };
+          x.matrixRot = 0;
           x.forceStss = true;
           x.deltas = ov.deltas;
           x.sync = ov.sync;
@@ -741,6 +831,7 @@
           });
           ov.deltas.forEach(function (d) { x.ticks += d; });
         } else {
+          if (tr === v && userRot !== 0) x.matrixRot = (baseRot + userRot) % 360;
           const rg = rangeFn(tr);
           for (let i = rg.a; i < rg.b; i++) {
             const sz = tr.sizes.at(i);
@@ -806,6 +897,23 @@
               dv.setUint32(wo, cur.dims.w * 65536);
               dv.setUint32(wo + 4, cur.dims.h * 65536);
             }
+            if (t === 'tkhd' && cur.matrixRot !== null && cur.tr.kind === 'vide') {
+              const mo = 8 + (ver === 1 ? 52 : 40);
+              const r = cur.matrixRot;
+              const ma = r === 180 ? -1 : (r === 90 || r === 270 ? 0 : 1);
+              const mbv = r === 90 ? 1 : (r === 270 ? -1 : 0);
+              const mcv = r === 90 ? -1 : (r === 270 ? 1 : 0);
+              const mdv2 = r === 180 ? -1 : (r === 90 || r === 270 ? 0 : 1);
+              dv.setInt32(mo, ma * 65536);
+              dv.setInt32(mo + 4, mbv * 65536);
+              dv.setInt32(mo + 8, 0);
+              dv.setInt32(mo + 12, mcv * 65536);
+              dv.setInt32(mo + 16, mdv2 * 65536);
+              dv.setInt32(mo + 20, 0);
+              dv.setInt32(mo + 24, 0);
+              dv.setInt32(mo + 28, 0);
+              dv.setInt32(mo + 32, 0x40000000);
+            }
             return c;
           }
           if (t === 'stbl') {
@@ -846,6 +954,7 @@
 
     /* ---------- Mode 1: keyframe cut (stream copy, lossless, no crop) ---------- */
     if (!opts.exact) {
+      if (userRot % 90 !== 0) throw new Error('Instant mode sirf 90/180/270 rotation support karta hai.');
       const starts = [];
       let j = 0;
       for (let t = 0; t < vDur; t += chunkSec) {
@@ -886,9 +995,12 @@
     const decCodec = 'avc1.' + hx(avcDesc.at(1)) + hx(avcDesc.at(2)) + hx(avcDesc.at(3));
     const srcW = mdv.getUint16(entry.start + 32);
     const srcH = mdv.getUint16(entry.start + 34);
-    const crop = cropFor(srcW, srcH, opts.ratio || 'original');
+    const totalRot = (baseRot + userRot) % 360;
+    const oddRot = Math.abs(totalRot % 180) === 90;
+    const cb = cropFor(oddRot ? srcH : srcW, oddRot ? srcW : srcH, opts.ratio || 'original');
+    const crop = totalRot === 0 ? cropFor(srcW, srcH, opts.ratio || 'original') : { sx: 0, sy: 0, w: cb.w, h: cb.h };
     const fps = Math.max(1, v.n / vDur);
-    const ctx = { file: file, v: v, desc: avcDesc, srcW: srcW, srcH: srcH, crop: crop };
+    const ctx = { file: file, v: v, desc: avcDesc, srcW: srcW, srcH: srcH, crop: crop, rot: totalRot };
     let encodeSeg = opts.encodeSegment;
     if (!encodeSeg) {
       if (typeof VideoDecoder === 'undefined' || typeof VideoEncoder === 'undefined') throw new Error('Browser mein WebCodecs nahi hai.');
@@ -1023,7 +1135,22 @@
     const block = new Uint8Array(await ctx.file.slice(minOff, maxEnd).arrayBuffer());
 
     const crop = ctx.crop;
-    const needCrop = crop.w !== ctx.srcW || crop.h !== ctx.srcH;
+    const rot = ctx.rot || 0;
+    const needCrop = rot === 0 && (crop.w !== ctx.srcW || crop.h !== ctx.srcH);
+    let oc = null;
+    let octx = null;
+    let rcos = 1;
+    let rsin = 0;
+    if (rot !== 0) {
+      oc = new OffscreenCanvas(crop.w, crop.h);
+      octx = oc.getContext('2d');
+      const rad = rot * Math.PI / 180;
+      const ac = Math.abs(Math.cos(rad));
+      const as = Math.abs(Math.sin(rad));
+      const kk = Math.max(1, (crop.w * ac + crop.h * as) / ctx.srcW, (crop.w * as + crop.h * ac) / ctx.srcH);
+      rcos = kk * Math.cos(rad);
+      rsin = kk * Math.sin(rad);
+    }
     const fdur = Math.round(1000000 / fps);
     const gop = Math.max(1, Math.round(fps * 2));
     let failure = null;
@@ -1056,7 +1183,14 @@
               init.displayWidth = crop.w;
               init.displayHeight = crop.h;
             }
-            const f2 = new VideoFrame(frame, init);
+            let f2;
+            if (rot !== 0) {
+              octx.setTransform(rcos, rsin, -rsin, rcos, crop.w / 2, crop.h / 2);
+              octx.drawImage(frame, -frame.displayWidth / 2, -frame.displayHeight / 2, frame.displayWidth, frame.displayHeight);
+              f2 = new VideoFrame(oc, { timestamp: pts - t0us, duration: fdur });
+            } else {
+              f2 = new VideoFrame(frame, init);
+            }
             encoder.encode(f2, { keyFrame: fi % gop === 0 });
             f2.close();
             fi++;
@@ -1146,7 +1280,8 @@
       return false;
     }
     const ratioVal = aspectRatio.value;
-    const wantExact = modeVal === 'exact';
+    const rotDeg = getRot();
+    let wantExact = modeVal === 'exact';
     const myRun = ++runToken;
     isRunning = true;
     isCancelled = false;
@@ -1161,13 +1296,17 @@
     previewVideo.pause();
     let exactMode = false;
     let note = '';
+    if (!wantExact && rotDeg % 90 !== 0) {
+      wantExact = true;
+      note = ' (Custom degree ki wajah se Exact mode use hua.)';
+    }
     try {
       setStatus('Quick Split: file analyze ho rahi hai...', 'work');
       let plan = null;
       if (wantExact) {
         if (typeof VideoDecoder !== 'undefined' && typeof VideoEncoder !== 'undefined') {
           try {
-            plan = await planQuickSplit(selectedFile, chunkSec, { exact: true, ratio: ratioVal });
+            plan = await planQuickSplit(selectedFile, chunkSec, { exact: true, ratio: ratioVal, rotate: rotDeg });
             exactMode = true;
           } catch (err) {
             note = ' Exact mode nahi chal saka (' + (err && err.message ? err.message : 'error') + '), keyframe cut use hua.';
@@ -1177,7 +1316,7 @@
         }
       }
       if (strict && !exactMode) return false;
-      if (!plan) plan = await planQuickSplit(selectedFile, chunkSec);
+      if (!plan) plan = await planQuickSplit(selectedFile, chunkSec, { rotate: rotDeg });
 
       const workers = exactMode ? Math.max(2, Math.min(4, Math.floor((navigator.hardwareConcurrency || 4) / 2))) : 1;
       const startedAt = performance.now();
@@ -1186,7 +1325,7 @@
 
       async function addResult(k, res) {
         if (isCancelled || myRun !== runToken) return;
-        const name = 'part_' + String(k + 1).padStart(3, '0') + '_' + (exactMode ? ratioVal.replace(':', 'x') : 'original') + '.mp4';
+        const name = 'part_' + String(k + 1).padStart(3, '0') + '_' + (exactMode ? ratioVal.replace(':', 'x') : 'original') + (rotDeg ? '_rot' + rotDeg : '') + '.mp4';
         const url = URL.createObjectURL(res.blob);
         const dlBtn = addDownload(res.blob, url, name, res.duration);
         if (autoDl.checked) {
@@ -1210,7 +1349,7 @@
         if (strict) return false;
         exactMode = false;
         note = ' Exact mode fail hua (' + (err && err.message ? err.message : 'error') + '), keyframe cut use hua.';
-        plan = await planQuickSplit(selectedFile, chunkSec);
+        plan = await planQuickSplit(selectedFile, chunkSec, { rotate: rotDeg });
         first = await plan.makeClip(0);
       }
       await addResult(0, first);
@@ -1492,14 +1631,21 @@
       muteSpeakers(true);
 
       const crop = getCrop();
+      const liveRot = getRot();
+      const RL = liveRot !== 0 ? rotLayout(video.videoWidth, video.videoHeight, aspectRatio.value, liveRot) : null;
       const canvas = document.createElement('canvas');
-      canvas.width = crop.w;
-      canvas.height = crop.h;
+      canvas.width = RL ? RL.w : crop.w;
+      canvas.height = RL ? RL.h : crop.h;
       const ctx = canvas.getContext('2d');
 
       function drawFrame() {
         if (!drawActive) return;
-        ctx.drawImage(video, crop.sx, crop.sy, crop.w, crop.h, 0, 0, crop.w, crop.h);
+        if (RL) {
+          ctx.setTransform(RL.k * Math.cos(RL.rad), RL.k * Math.sin(RL.rad), -RL.k * Math.sin(RL.rad), RL.k * Math.cos(RL.rad), RL.w / 2, RL.h / 2);
+          ctx.drawImage(video, -video.videoWidth / 2, -video.videoHeight / 2, video.videoWidth, video.videoHeight);
+        } else {
+          ctx.drawImage(video, crop.sx, crop.sy, crop.w, crop.h, 0, 0, crop.w, crop.h);
+        }
         requestAnimationFrame(drawFrame);
       }
       drawFrame();
