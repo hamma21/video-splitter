@@ -188,6 +188,7 @@
       <p class="hint">Auto download off ho to clips neeche list mein ready milengi, PC mein save nahi hongi. Aap Preview ya Download khud dabayein.</p>
     </div>
 
+    <label style="display:flex;align-items:center;gap:10px;color:var(--text);font-size:15px;margin:14px 0 0;cursor:pointer;"><input type="checkbox" id="liveMode" style="width:18px;height:18px;accent-color:var(--accent);"> Live mode (video play hote hue real-time record, slow)</label>
     <div class="actions">
       <button class="btn primary" id="splitBtn" disabled>Auto Split and Export</button>
       <button class="btn" id="quickBtn" disabled>Quick Split (Fast)</button>
@@ -201,7 +202,7 @@
 
     <div class="bar"><div id="barFill"></div></div>
     <p id="status">Pehle video select karein.</p>
-    <p class="hint">Split ke dauran video pause karein to splitting bhi ruk jati hai, aur dobara play karne par wahin se continue hoti hai. Is tab ko open aur visible rakhein. Auto Split clips real-time mein record karta hai (aspect ratio crop ke saath). Quick Split bina play kiye clips banata hai. Mode 'Exact' mein seconds aur aspect ratio dono apply hoti hain (har frame hardware encoder se guzarta hai, to speed PC par depend karti hai; status mein asli speed dikhti hai). Mode 'Instant' lossless keyframe cut karta hai: bijli jaisa tez, lekin lengths 1-8 sec upar neeche ho sakti hain aur ratio Original rehta hai. Dono H.264 MP4/MOV ke liye hain.</p>
+    <p class="hint">Split ke dauran video pause karein to splitting bhi ruk jati hai, aur dobara play karne par wahin se continue hoti hai. Is tab ko open aur visible rakhein. Auto Split ab by default fast engine (hardware encoder, parallel clips) use karta hai. Live mode on karein to video play hote hue real-time record hoti hai (slow, lekin preview aur pause kaam karte hain). Quick Split bina play kiye clips banata hai. Mode 'Exact' mein seconds aur aspect ratio dono apply hoti hain (har frame hardware encoder se guzarta hai, to speed PC par depend karti hai; status mein asli speed dikhti hai). Mode 'Instant' lossless keyframe cut karta hai: bijli jaisa tez, lekin lengths 1-8 sec upar neeche ho sakti hain aur ratio Original rehta hai. Dono H.264 MP4/MOV ke liye hain.</p>
   </div>
 
   <div class="panel" id="resultPanel" style="display:none;">
@@ -255,6 +256,7 @@
   const pauseSplitBtn = document.getElementById('pauseSplitBtn');
   const quickBtn = document.getElementById('quickBtn');
   const quickMode = document.getElementById('quickMode');
+  const liveMode = document.getElementById('liveMode');
   const removeBtn = document.getElementById('removeBtn');
   let runToken = 0;
   let partEnding = false;
@@ -1136,15 +1138,15 @@
   }
   /* QS-END */
 
-  quickBtn.addEventListener('click', async function () {
-    if (!selectedFile || isRunning) return;
+  async function runQuick(modeVal, strict) {
+    if (!selectedFile || isRunning) return false;
     const chunkSec = getChunkSeconds();
     if (chunkSec <= 0) {
       setStatus('Split value 0 se zyada honi chahiye.', 'err');
-      return;
+      return false;
     }
     const ratioVal = aspectRatio.value;
-    const wantExact = quickMode.value === 'exact';
+    const wantExact = modeVal === 'exact';
     const myRun = ++runToken;
     isRunning = true;
     isCancelled = false;
@@ -1174,6 +1176,7 @@
           note = ' Is browser mein WebCodecs nahi hai (Chrome ya Edge use karein), keyframe cut use hua.';
         }
       }
+      if (strict && !exactMode) return false;
       if (!plan) plan = await planQuickSplit(selectedFile, chunkSec);
 
       const workers = exactMode ? Math.max(2, Math.min(4, Math.floor((navigator.hardwareConcurrency || 4) / 2))) : 1;
@@ -1204,6 +1207,7 @@
         first = await plan.makeClip(0);
       } catch (err) {
         if (!exactMode) throw err;
+        if (strict) return false;
         exactMode = false;
         note = ' Exact mode fail hua (' + (err && err.message ? err.message : 'error') + '), keyframe cut use hua.';
         plan = await planQuickSplit(selectedFile, chunkSec);
@@ -1221,8 +1225,10 @@
         msg += note;
         setStatus(msg, exactMode || !wantExact ? 'ok' : 'work');
       }
+      return true;
     } catch (err) {
-      setStatus('Quick Split error: ' + (err && err.message ? err.message : 'fail') + ' Normal Auto Split try karein.', 'err');
+      setStatus('Quick Split error: ' + (err && err.message ? err.message : 'fail') + ' Live mode (checkbox) try karein.', 'err');
+      return true;
     } finally {
       isRunning = false;
       fileInput.disabled = false;
@@ -1230,6 +1236,14 @@
       stopBtn.style.display = 'none';
       splitBtn.disabled = !videoReady;
       quickBtn.disabled = !selectedFile;
+    }
+  }
+
+  quickBtn.addEventListener('click', function () { runQuick(quickMode.value, false); });
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden && activeRecorder && activeRecorder.state === 'recording') {
+      setStatus('Tab hidden hai, live recording ruk sakti hai. Is tab par wapas aayein.', 'err');
     }
   });
 
@@ -1243,6 +1257,9 @@
       audioDest = audioCtx.createMediaStreamDestination();
       audioSrc.connect(audioDest);
       audioSrc.connect(audioCtx.destination);
+      audioCtx.onstatechange = function () {
+        if (isRunning && audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+      };
     } catch (err) {
       audioCtx = null;
       audioSrc = null;
@@ -1266,6 +1283,7 @@
         resolve();
       };
       previewVideo.addEventListener('seeked', done);
+      setTimeout(done, 3000);
       previewVideo.currentTime = t;
     });
   }
@@ -1418,7 +1436,6 @@
 
   stopBtn.addEventListener('click', function () {
     isCancelled = true;
-    if (activeTimer) clearInterval(activeTimer);
     previewVideo.pause();
     if (activeRecorder && activeRecorder.state !== 'inactive') activeRecorder.stop();
     setStatus('Splitting user ne rok di.', 'err');
@@ -1428,6 +1445,10 @@
     if (!selectedFile || !videoReady) {
       setStatus('Pehle video load hone dein.', 'err');
       return;
+    }
+    if (!liveMode.checked && typeof VideoDecoder !== 'undefined' && typeof VideoEncoder !== 'undefined') {
+      const handled = await runQuick('exact', true);
+      if (handled) return;
     }
     if (typeof MediaRecorder === 'undefined' || !previewVideo.captureStream && !previewVideo.mozCaptureStream) {
       setStatus('Is browser mein recording support nahi hai. Chrome ya Edge use karein.', 'err');
@@ -1520,12 +1541,29 @@
 
         partEnding = false;
         await new Promise(function (resolve) {
+          let lastT = video.currentTime;
+          let lastMove = performance.now();
           activeTimer = setInterval(function () {
+            const now = performance.now();
             const partProgress = Math.min(1, Math.max(0, (video.currentTime - startTime) / (endTime - startTime)));
             barFill.style.width = (((i + partProgress) / totalParts) * 100).toFixed(1) + '%';
+            if (Math.abs(video.currentTime - lastT) > 0.01 || video.paused) {
+              lastT = video.currentTime;
+              lastMove = now;
+            }
             if (isCancelled || video.ended || video.currentTime >= endTime - 0.05) {
               clearInterval(activeTimer);
               resolve();
+              return;
+            }
+            if (!video.paused && now - lastMove > 2500) {
+              if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+              const pp = video.play();
+              if (pp && pp.catch) pp.catch(function () {});
+              if (now - lastMove > 20000) {
+                clearInterval(activeTimer);
+                resolve();
+              }
             }
           }, 100);
         });
@@ -1533,7 +1571,7 @@
         partEnding = true;
         video.pause();
         if (recorder.state !== 'inactive') recorder.stop();
-        await stopped;
+        await Promise.race([stopped, new Promise(function (r) { setTimeout(r, 5000); })]);
 
         if (isCancelled) break;
 
