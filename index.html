@@ -188,14 +188,14 @@
 
     <div class="actions">
       <button class="btn primary" id="splitBtn" disabled>Auto Split and Export</button>
-      <button class="btn" id="quickBtn" disabled>Quick Split (5-10 sec)</button>
+      <button class="btn" id="quickBtn" disabled>Quick Split (Fast)</button>
       <button class="btn" id="pauseSplitBtn" style="display:none;">Pause Splitting</button>
       <button class="btn danger" id="stopBtn" style="display:none;">Stop Splitting</button>
     </div>
 
     <div class="bar"><div id="barFill"></div></div>
     <p id="status">Pehle video select karein.</p>
-    <p class="hint">Split ke dauran video pause karein to splitting bhi ruk jati hai, aur dobara play karne par wahin se continue hoti hai. Is tab ko open aur visible rakhein. Auto Split clips real-time mein record karta hai (aspect ratio crop ke saath). Quick Split MP4/MOV ko bina play kiye foran kaat deta hai, lekin cut keyframe par lagta hai (clip length 1-2 sec upar neeche ho sakti hai) aur aspect ratio Original rehta hai.</p>
+    <p class="hint">Split ke dauran video pause karein to splitting bhi ruk jati hai, aur dobara play karne par wahin se continue hoti hai. Is tab ko open aur visible rakhein. Auto Split clips real-time mein record karta hai (aspect ratio crop ke saath). Quick Split bina play kiye clips banata hai: upar di gayi seconds aur aspect ratio dono apply hoti hain (H.264 MP4/MOV, Chrome ya Edge). Speed aapke PC ke video encoder par depend karti hai, aam taur par real-time se kai guna tez. Agar browser support na kare to ye sirf keyframe par lossless cut karta hai (lengths upar neeche, ratio Original).</p>
   </div>
 
   <div class="panel" id="resultPanel" style="display:none;">
@@ -645,7 +645,8 @@
     return { trak: trak, kind: kind, ts: ts, n: n, sizes: sizes, deltas: deltas, dts: dts, offsets: offsets, syncSet: syncSet, cts: cts, cttsVer: cttsVer, totalTicks: t, bounds: [] };
   }
 
-  async function planQuickSplit(file, chunkSec) {
+  async function planQuickSplit(file, chunkSec, opts) {
+    opts = opts || {};
     const top = await readTopBoxes(file);
     const moovTop = top.find(function (b) { return b.type === 'moov'; });
     const ftypTop = top.find(function (b) { return b.type === 'ftyp'; });
@@ -678,25 +679,8 @@
     if (kfs.length === 0) throw new Error('Keyframes nahi mile.');
 
     const vDur = v.totalTicks / v.ts;
-    const starts = [];
-    let j = 0;
-    for (let t = 0; t < vDur; t += chunkSec) {
-      while (j + 1 < kfs.length && v.dts.at(kfs.at(j + 1)) / v.ts <= t + 0.001) j++;
-      const idx = kfs.at(j);
-      if (starts.length === 0 || idx > starts.at(starts.length - 1)) starts.push(idx);
-    }
 
-    tracks.forEach(function (tr) {
-      let ptr = 0;
-      starts.forEach(function (si, k) {
-        if (tr === v) { tr.bounds.push(si); return; }
-        const T = k === 0 ? 0 : v.dts.at(si) / v.ts;
-        while (ptr < tr.n && tr.dts.at(ptr) / tr.ts < T - 0.0005) ptr++;
-        tr.bounds.push(ptr);
-      });
-    });
-
-    function makeClip(k) {
+    function assemble(rangeFn, ov) {
       const info = [];
       const byStart = new Map();
       const slices = [];
@@ -704,24 +688,39 @@
       let movieDur = 0;
 
       tracks.forEach(function (tr) {
-        const a = tr.bounds.at(k);
-        const b = k + 1 < starts.length ? tr.bounds.at(k + 1) : tr.n;
-        const x = { tr: tr, sizes: [], deltas: [], cts: tr.cts ? [] : null, sync: [], offs: [], ticks: 0, firstCts: 0 };
-        for (let i = a; i < b; i++) {
-          const sz = tr.sizes.at(i);
-          const so = tr.offsets.at(i);
-          x.sizes.push(sz);
-          x.deltas.push(tr.deltas.at(i));
-          x.ticks += tr.deltas.at(i);
-          if (x.cts) x.cts.push(tr.cts.at(i));
-          if (tr.syncSet && tr.syncSet.has(i)) x.sync.push(i - a + 1);
-          x.offs.push(cursor);
-          const last = slices.length > 0 ? slices.at(slices.length - 1) : null;
-          if (last && last.end === so) last.end = so + sz;
-          else slices.push({ start: so, end: so + sz });
-          cursor += sz;
+        const x = { tr: tr, sizes: [], deltas: [], cts: tr.cts ? [] : null, sync: [], offs: [], ticks: 0, firstCts: 0, stsd: null, dims: null, forceStss: false };
+        if (ov && tr === v) {
+          x.cts = null;
+          x.stsd = ov.stsd;
+          x.dims = { w: ov.width, h: ov.height };
+          x.forceStss = true;
+          x.deltas = ov.deltas;
+          x.sync = ov.sync;
+          ov.chunks.forEach(function (c) {
+            x.sizes.push(c.data.length);
+            x.offs.push(cursor);
+            slices.push({ data: c.data });
+            cursor += c.data.length;
+          });
+          ov.deltas.forEach(function (d) { x.ticks += d; });
+        } else {
+          const rg = rangeFn(tr);
+          for (let i = rg.a; i < rg.b; i++) {
+            const sz = tr.sizes.at(i);
+            const so = tr.offsets.at(i);
+            x.sizes.push(sz);
+            x.deltas.push(tr.deltas.at(i));
+            x.ticks += tr.deltas.at(i);
+            if (x.cts) x.cts.push(tr.cts.at(i));
+            if (tr.syncSet && tr.syncSet.has(i)) x.sync.push(i - rg.a + 1);
+            x.offs.push(cursor);
+            const last = slices.length > 0 ? slices.at(slices.length - 1) : null;
+            if (last && !last.data && last.end === so) last.end = so + sz;
+            else slices.push({ start: so, end: so + sz });
+            cursor += sz;
+          }
+          x.firstCts = x.cts && x.cts.length > 0 ? x.cts.at(0) : 0;
         }
-        x.firstCts = x.cts && x.cts.length > 0 ? x.cts.at(0) : 0;
         movieDur = Math.max(movieDur, Math.round(x.ticks / tr.ts * movieTs));
         info.push(x);
         byStart.set(tr.trak.start, x);
@@ -757,7 +756,7 @@
             let off;
             let dur;
             if (t === 'mvhd') { off = 8 + (ver === 1 ? 24 : 16); dur = movieDur; }
-            else if (t === 'tkhd') { off = 8 + (ver === 1 ? 32 : 20); dur = Math.round(cur.ticks / cur.tr.ts * movieTs); }
+            else if (t === 'tkhd') { off = 8 + (ver === 1 ? 28 : 20); dur = Math.round(cur.ticks / cur.tr.ts * movieTs); }
             else { off = 8 + (ver === 1 ? 24 : 16); dur = cur.ticks; }
             if (ver === 1) {
               dv.setUint32(off, Math.floor(dur / 4294967296));
@@ -765,18 +764,23 @@
             } else {
               dv.setUint32(off, dur);
             }
+            if (t === 'tkhd' && cur.dims) {
+              const wo = 8 + (ver === 1 ? 88 : 76);
+              dv.setUint32(wo, cur.dims.w * 65536);
+              dv.setUint32(wo + 4, cur.dims.h * 65536);
+            }
             return c;
           }
           if (t === 'stbl') {
             const stsd = child(mdv, box, 'stsd');
-            const parts = [mb.slice(stsd.start, stsd.end)];
+            const parts = [cur.stsd ? cur.stsd : mb.slice(stsd.start, stsd.end)];
             const sr = rle(cur.deltas);
             parts.push(mk('stts', [u32s([0, sr.length / 2]), u32s(sr)]));
             if (cur.cts) {
               const cr = rle(cur.cts);
               parts.push(mk('ctts', [u32s([cur.tr.cttsVer * 16777216, cr.length / 2]), u32s(cr)]));
             }
-            if (cur.tr.syncSet) parts.push(mk('stss', [u32s([0, cur.sync.length]), u32s(cur.sync)]));
+            if (cur.tr.syncSet || cur.forceStss) parts.push(mk('stss', [u32s([0, cur.sync.length]), u32s(cur.sync)]));
             parts.push(mk('stsc', [u32s([0, 1, 1, 1, 1])]));
             parts.push(mk('stsz', [u32s([0, 0, cur.sizes.length]), u32s(cur.sizes)]));
             const abs = [];
@@ -799,11 +803,237 @@
       'mdat'.split('').forEach(function (ch, i) { hdv.setUint8(4 + i, ch.charCodeAt(0)); });
 
       const blobParts = [ftyp, moov, head];
-      slices.forEach(function (sl) { blobParts.push(file.slice(sl.start, sl.end)); });
+      slices.forEach(function (sl) { blobParts.push(sl.data ? sl.data : file.slice(sl.start, sl.end)); });
       return { blob: new Blob(blobParts, { type: 'video/mp4' }), duration: movieDur / movieTs };
     }
 
-    return { count: starts.length, makeClip: makeClip };
+    /* ---------- Mode 1: keyframe cut (stream copy, lossless, no crop) ---------- */
+    if (!opts.exact) {
+      const starts = [];
+      let j = 0;
+      for (let t = 0; t < vDur; t += chunkSec) {
+        while (j + 1 < kfs.length && v.dts.at(kfs.at(j + 1)) / v.ts <= t + 0.001) j++;
+        const idx = kfs.at(j);
+        if (starts.length === 0 || idx > starts.at(starts.length - 1)) starts.push(idx);
+      }
+      tracks.forEach(function (tr) {
+        let ptr = 0;
+        starts.forEach(function (si, k) {
+          if (tr === v) { tr.bounds.push(si); return; }
+          const T = k === 0 ? 0 : v.dts.at(si) / v.ts;
+          while (ptr < tr.n && tr.dts.at(ptr) / tr.ts < T - 0.0005) ptr++;
+          tr.bounds.push(ptr);
+        });
+      });
+      return {
+        count: starts.length,
+        makeClip: async function (k) {
+          return assemble(function (tr) {
+            return { a: tr.bounds.at(k), b: k + 1 < starts.length ? tr.bounds.at(k + 1) : tr.n };
+          }, null);
+        }
+      };
+    }
+
+    /* ---------- Mode 2: exact seconds + aspect ratio (WebCodecs re-encode, audio copied) ---------- */
+    const mdiaBox = child(mdv, v.trak, 'mdia');
+    const vStbl = child(mdv, child(mdv, mdiaBox, 'minf'), 'stbl');
+    const vStsd = child(mdv, vStbl, 'stsd');
+    const entry = parseBoxes(mdv, vStsd.start + 16, vStsd.end).find(function (b) { return b.type === 'avc1' || b.type === 'avc3'; });
+    if (!entry) throw new Error('Video H.264 nahi hai (HEVC/H.265 wagera).');
+    const avcCbox = parseBoxes(mdv, entry.start + 86, entry.end).find(function (b) { return b.type === 'avcC'; });
+    if (!avcCbox) throw new Error('avcC missing.');
+    const avcDesc = mb.slice(avcCbox.start + 8, avcCbox.end);
+    function hx(n) { return ('0' + n.toString(16)).slice(-2); }
+    const decCodec = 'avc1.' + hx(avcDesc.at(1)) + hx(avcDesc.at(2)) + hx(avcDesc.at(3));
+    const srcW = mdv.getUint16(entry.start + 32);
+    const srcH = mdv.getUint16(entry.start + 34);
+    const crop = cropFor(srcW, srcH, opts.ratio || 'original');
+    const fps = Math.max(1, v.n / vDur);
+    const ctx = { file: file, v: v, desc: avcDesc, srcW: srcW, srcH: srcH, crop: crop };
+    let encodeSeg = opts.encodeSegment;
+    if (!encodeSeg) {
+      if (typeof VideoDecoder === 'undefined' || typeof VideoEncoder === 'undefined') throw new Error('Browser mein WebCodecs nahi hai.');
+      const dsup = await VideoDecoder.isConfigSupported({ codec: decCodec, description: avcDesc });
+      if (!dsup || !dsup.supported) throw new Error('Browser is video ko decode nahi kar sakta.');
+      let srcBytes = 0;
+      v.sizes.forEach(function (z) { srcBytes += z; });
+      const srcBits = srcBytes * 8 / vDur;
+      const bitrate = Math.round(Math.min(20000000, Math.max(1500000, srcBits * (crop.w * crop.h) / (srcW * srcH) * 1.1)));
+      const encCfg = await pickEncCfg(crop.w, crop.h, fps, bitrate);
+      encodeSeg = function (t0, t1) { return realEncode(t0, t1, ctx, encCfg, fps, kfs); };
+    }
+
+    const count = Math.max(1, Math.ceil(vDur / chunkSec - 0.0001));
+    return {
+      count: count,
+      makeClip: async function (k) {
+        const t0 = k * chunkSec;
+        const t1 = Math.min((k + 1) * chunkSec, vDur);
+        const enc = await encodeSeg(t0, t1, ctx);
+        if (!enc.chunks.length) throw new Error('Video frames nahi mile.');
+        const ticks = enc.chunks.map(function (c) { return Math.round(c.ts * v.ts / 1000000); });
+        const deltas = [];
+        ticks.forEach(function (tk, i) {
+          if (i + 1 < ticks.length) deltas.push(ticks.at(i + 1) - tk);
+          else deltas.push(deltas.length > 0 ? deltas.at(deltas.length - 1) : Math.round(v.ts / fps));
+        });
+        const sync = [];
+        enc.chunks.forEach(function (c, i) { if (c.key) sync.push(i + 1); });
+        const ov = { chunks: enc.chunks, deltas: deltas, sync: sync, stsd: buildStsd(enc.width, enc.height, enc.description), width: enc.width, height: enc.height };
+        const lastClip = k === count - 1;
+        return assemble(function (tr) {
+          let a = 0;
+          while (a < tr.n && tr.dts.at(a) / tr.ts < t0 - 0.0005) a++;
+          let b = a;
+          if (lastClip) b = tr.n;
+          else while (b < tr.n && tr.dts.at(b) / tr.ts < t1 - 0.0005) b++;
+          return { a: a, b: b };
+        }, ov);
+      }
+    };
+  }
+
+  function cropFor(vw, vh, ratio) {
+    let a = 0;
+    if (ratio === '16:9') a = 16 / 9;
+    else if (ratio === '9:16') a = 9 / 16;
+    else if (ratio === '1:1') a = 1;
+    let w = vw;
+    let h = vh;
+    if (a > 0) {
+      if (vw / vh > a) { h = vh; w = Math.round(vh * a); }
+      else { w = vw; h = Math.round(vw / a); }
+    }
+    w = w - (w % 2);
+    h = h - (h % 2);
+    let sx = Math.round((vw - w) / 2);
+    let sy = Math.round((vh - h) / 2);
+    sx = sx - (sx % 2);
+    sy = sy - (sy % 2);
+    return { sx: sx, sy: sy, w: w, h: h };
+  }
+
+  function buildStsd(w, h, avcC) {
+    const hdr = new Uint8Array(78);
+    const dv = new DataView(hdr.buffer);
+    dv.setUint16(6, 1);
+    dv.setUint16(24, w);
+    dv.setUint16(26, h);
+    dv.setUint32(28, 0x00480000);
+    dv.setUint32(32, 0x00480000);
+    dv.setUint16(40, 1);
+    dv.setUint16(74, 0x18);
+    dv.setUint16(76, 0xFFFF);
+    const entry = mk('avc1', [hdr, mk('avcC', [avcC])]);
+    return mk('stsd', [u32s([0, 1]), entry]);
+  }
+
+  async function pickEncCfg(cw, ch, fps, bitrate) {
+    const mbs = Math.ceil(cw / 16) * Math.ceil(ch / 16);
+    const mbps = mbs * fps;
+    let lvl = '33';
+    if (mbs <= 3600 && mbps <= 108000) lvl = '1f';
+    else if (mbs <= 8192 && mbps <= 245760) lvl = '28';
+    else if (mbs <= 8704 && mbps <= 522240) lvl = '2a';
+    for (const pr of ['6400', '4d00', '4200']) {
+      const cfg = { codec: 'avc1.' + pr + lvl, width: cw, height: ch, bitrate: bitrate, framerate: Math.round(fps), avc: { format: 'avc' }, latencyMode: 'realtime' };
+      try {
+        const r = await VideoEncoder.isConfigSupported(cfg);
+        if (r && r.supported) return cfg;
+      } catch (err) {}
+    }
+    throw new Error('Browser H.264 encoder support nahi karta.');
+  }
+
+  function sleepMs(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  async function realEncode(t0, t1, ctx, encCfg, fps, kfs) {
+    const v = ctx.v;
+    const t0us = Math.round(t0 * 1000000);
+    const t1us = Math.round(t1 * 1000000);
+    function ptsUs(i) { return Math.round((v.dts.at(i) + (v.cts ? v.cts.at(i) : 0)) * 1000000 / v.ts); }
+    let ki = kfs.at(0);
+    for (let q = 0; q < kfs.length; q++) {
+      if (ptsUs(kfs.at(q)) <= t0us) ki = kfs.at(q);
+      else break;
+    }
+    let last = ki;
+    while (last < v.n && v.dts.at(last) / v.ts < t1 + 0.4) last++;
+    let minOff = Infinity;
+    let maxEnd = 0;
+    for (let i = ki; i < last; i++) {
+      minOff = Math.min(minOff, v.offsets.at(i));
+      maxEnd = Math.max(maxEnd, v.offsets.at(i) + v.sizes.at(i));
+    }
+    if (maxEnd - minOff > 700000000) throw new Error('Segment bohat bara hai, chhota split interval chunein.');
+    const block = new Uint8Array(await ctx.file.slice(minOff, maxEnd).arrayBuffer());
+
+    const crop = ctx.crop;
+    const needCrop = crop.w !== ctx.srcW || crop.h !== ctx.srcH;
+    const fdur = Math.round(1000000 / fps);
+    const gop = Math.max(1, Math.round(fps * 2));
+    let failure = null;
+    let desc = null;
+    let fi = 0;
+    const out = [];
+
+    const encoder = new VideoEncoder({
+      output: function (chunk, meta) {
+        const d = new Uint8Array(chunk.byteLength);
+        chunk.copyTo(d);
+        out.push({ data: d, ts: chunk.timestamp, key: chunk.type === 'key' });
+        if (!desc && meta && meta.decoderConfig && meta.decoderConfig.description) {
+          const dd = meta.decoderConfig.description;
+          desc = new Uint8Array(ArrayBuffer.isView(dd) ? dd.buffer.slice(dd.byteOffset, dd.byteOffset + dd.byteLength) : dd.slice(0));
+        }
+      },
+      error: function (e) { failure = e; }
+    });
+    encoder.configure(encCfg);
+
+    const decoder = new VideoDecoder({
+      output: function (frame) {
+        try {
+          const pts = frame.timestamp;
+          if (pts >= t0us && pts < t1us) {
+            const init = { timestamp: pts - t0us, duration: fdur };
+            if (needCrop) {
+              init.visibleRect = { x: frame.visibleRect.x + crop.sx, y: frame.visibleRect.y + crop.sy, width: crop.w, height: crop.h };
+              init.displayWidth = crop.w;
+              init.displayHeight = crop.h;
+            }
+            const f2 = new VideoFrame(frame, init);
+            encoder.encode(f2, { keyFrame: fi % gop === 0 });
+            f2.close();
+            fi++;
+          }
+        } catch (e) { failure = e; }
+        frame.close();
+      },
+      error: function (e) { failure = e; }
+    });
+    decoder.configure({ codec: 'avc1.' + ('0' + ctx.desc.at(1).toString(16)).slice(-2) + ('0' + ctx.desc.at(2).toString(16)).slice(-2) + ('0' + ctx.desc.at(3).toString(16)).slice(-2), description: ctx.desc });
+
+    for (let i = ki; i < last; i++) {
+      if (failure) break;
+      const off = v.offsets.at(i) - minOff;
+      decoder.decode(new EncodedVideoChunk({
+        type: (!v.syncSet || v.syncSet.has(i)) ? 'key' : 'delta',
+        timestamp: ptsUs(i),
+        data: block.subarray(off, off + v.sizes.at(i))
+      }));
+      while ((decoder.decodeQueueSize > 8 || encoder.encodeQueueSize > 8) && !failure) await sleepMs(2);
+    }
+    if (!failure) {
+      await decoder.flush();
+      await encoder.flush();
+    }
+    try { decoder.close(); } catch (err) {}
+    try { encoder.close(); } catch (err) {}
+    if (failure) throw failure;
+    if (!desc) throw new Error('Encoder ne config nahi di.');
+    return { chunks: out, description: desc, width: crop.w, height: crop.h };
   }
   /* QS-END */
 
@@ -814,6 +1044,7 @@
       setStatus('Split value 0 se zyada honi chahiye.', 'err');
       return;
     }
+    const ratioVal = aspectRatio.value;
     isRunning = true;
     isCancelled = false;
     splitBtn.disabled = true;
@@ -824,15 +1055,42 @@
     resultPanel.style.display = 'none';
     barFill.style.width = '0%';
     previewVideo.pause();
+    let exactMode = false;
+    let note = '';
     try {
       setStatus('Quick Split: file analyze ho rahi hai...', 'work');
-      const plan = await planQuickSplit(selectedFile, chunkSec);
+      let plan = null;
+      if (typeof VideoDecoder !== 'undefined' && typeof VideoEncoder !== 'undefined') {
+        try {
+          plan = await planQuickSplit(selectedFile, chunkSec, { exact: true, ratio: ratioVal });
+          exactMode = true;
+        } catch (err) {
+          note = ' Exact mode nahi chal saka (' + (err && err.message ? err.message : 'error') + '), keyframe cut use hua.';
+        }
+      } else {
+        note = ' Is browser mein WebCodecs nahi hai (Chrome ya Edge use karein), keyframe cut use hua.';
+      }
+      if (!plan) plan = await planQuickSplit(selectedFile, chunkSec);
+
       let made = 0;
-      for (let k = 0; k < plan.count; k++) {
+      let k = 0;
+      while (k < plan.count) {
         if (isCancelled) break;
-        setStatus('Quick Split: clip ' + (k + 1) + ' of ' + plan.count + ' ban rahi hai...', 'work');
-        const res = plan.makeClip(k);
-        const name = 'part_' + String(k + 1).padStart(3, '0') + '_original.mp4';
+        setStatus('Quick Split: clip ' + (k + 1) + ' of ' + plan.count + (exactMode ? ' encode ho rahi hai (' + ratioVal + ')...' : ' ban rahi hai...'), 'work');
+        let res;
+        try {
+          res = await plan.makeClip(k);
+        } catch (err) {
+          if (exactMode && made === 0) {
+            exactMode = false;
+            note = ' Exact mode fail hua (' + (err && err.message ? err.message : 'error') + '), keyframe cut use hua.';
+            plan = await planQuickSplit(selectedFile, chunkSec);
+            k = 0;
+            continue;
+          }
+          throw err;
+        }
+        const name = 'part_' + String(k + 1).padStart(3, '0') + '_' + (exactMode ? ratioVal.replace(':', 'x') : 'original') + '.mp4';
         const url = URL.createObjectURL(res.blob);
         const dlBtn = addDownload(res.blob, url, name, res.duration);
         if (autoDl.checked) {
@@ -840,13 +1098,17 @@
           if (where === 'folder') dlBtn.innerText = 'Saved \u2713';
         }
         made++;
-        barFill.style.width = (((k + 1) / plan.count) * 100).toFixed(1) + '%';
+        k++;
+        barFill.style.width = ((k / plan.count) * 100).toFixed(1) + '%';
         await new Promise(function (r) { setTimeout(r, 0); });
       }
       if (!isCancelled) {
-        let msg = 'Quick Split mukammal! ' + made + ' clips ready hain. ' + (autoDl.checked ? 'Auto save ho chuki hain.' : 'Neeche Preview ya Download button use karein.');
-        if (aspectRatio.value !== 'original') msg += ' (Quick Split mein aspect ratio Original hi rehta hai.)';
-        setStatus(msg, 'ok');
+        let msg = 'Quick Split mukammal! ' + made + ' clips ready hain';
+        msg += exactMode ? ' (har clip ' + chunkSec + ' sec, ratio ' + ratioVal + '). ' : '. ';
+        msg += autoDl.checked ? 'Auto save ho chuki hain.' : 'Neeche Preview ya Download button use karein.';
+        if (!exactMode && ratioVal !== 'original') msg += ' Aspect ratio apply nahi hui.';
+        msg += note;
+        setStatus(msg, exactMode ? 'ok' : 'work');
       }
     } catch (err) {
       setStatus('Quick Split error: ' + (err && err.message ? err.message : 'fail') + ' Normal Auto Split try karein.', 'err');
