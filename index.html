@@ -364,13 +364,15 @@
     const editorUrl = new URL('editor.html', window.location.href);
     const token = Date.now().toString(36) + Math.random().toString(36).slice(2);
     editorUrl.hash = token;
-    const tab = window.open('about:blank', '_blank');
+    const session = { window: null, blob: blob, name: name };
+    editorSessions.set(token, session);
+    const tab = window.open(editorUrl.href, '_blank');
     if (!tab) {
+      editorSessions.delete(token);
       setStatus('Editor tab open nahi hui. Browser mein pop-ups allow karke dobara try karein.', 'err');
       return;
     }
-    editorSessions.set(token, { window: tab, blob: blob, name: name });
-    tab.location.href = editorUrl.href;
+    session.window = tab;
   }
 
   function setStatus(msg, kind) {
