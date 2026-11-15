@@ -124,6 +124,10 @@
   .rotRow .btn { padding: 8px 12px; font-size: 14px; }
   .rotRow input { width: 84px; }
   .rotLabel { color: var(--muted); font-size: 14px; }
+  #capStatus { font-size: 13px; color: var(--muted); margin: 12px 0 0; }
+  #capStatus.ok { color: var(--accent); }
+  #capStatus.err { color: var(--danger); }
+  #capStatus.work { color: var(--warn); }
 </style>
 </head>
 <body>
@@ -147,6 +151,7 @@
     <div class="player" id="player">
       <div id="placeholder">Abhi koi video load nahi hui</div>
       <video id="previewVideo" playsinline></video>
+      <canvas id="capCanvas" style="position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;"></canvas>
       <button id="bigPlay" aria-label="Play video">&#9654;</button>
       <div class="ctrlbar" id="ctrlBar">
         <button id="playBtn" aria-label="Play or pause">&#9654;</button>
@@ -167,8 +172,48 @@
     <div class="timeline" id="timeline"></div>
   </div>
 
+  <div class="panel" id="capPanel">
+    <h2>3. Captions (English, awaaz se auto)</h2>
+    <label style="display:flex;align-items:center;gap:10px;color:var(--text);font-size:15px;margin:0 0 14px;cursor:pointer;"><input type="checkbox" id="capOn" style="width:18px;height:18px;accent-color:var(--accent);"> Clips mein captions add karein</label>
+    <div class="grid">
+      <div>
+        <label for="capStyle">Caption template</label>
+        <select id="capStyle">
+          <option value="classic">Classic (white + outline)</option>
+          <option value="karaoke">Karaoke (word highlight)</option>
+          <option value="pop">Bold Pop (1-2 bare words)</option>
+          <option value="boxed">Boxed (dark bar)</option>
+          <option value="neon">Neon glow</option>
+          <option value="minimal">Minimal</option>
+        </select>
+      </div>
+      <div>
+        <label for="capPos">Position</label>
+        <select id="capPos">
+          <option value="bottom">Bottom</option>
+          <option value="middle">Middle</option>
+          <option value="top">Top</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid" style="margin-top:12px;">
+      <div>
+        <label for="capModel">AI model (voice to text)</label>
+        <select id="capModel">
+          <option value="Xenova/whisper-tiny.en">Fast (tiny, ~40 MB)</option>
+          <option value="Xenova/whisper-base.en">Better accuracy (base, ~80 MB)</option>
+        </select>
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <button class="btn primary" id="capGen" type="button" disabled>Generate Captions</button>
+      </div>
+    </div>
+    <p id="capStatus">Video load karein, phir Generate Captions dabayein. Template ka sample preview mein dikhta hai.</p>
+  </div>
+
   <div class="panel">
-    <h2>3. Split settings</h2>
+    <h2>4. Split settings</h2>
     <div class="grid">
       <div>
         <label for="splitValue">Split every</label>
@@ -215,7 +260,7 @@
 
     <div class="bar"><div id="barFill"></div></div>
     <p id="status">Pehle video select karein.</p>
-    <p class="hint">Split ke dauran video pause karein to splitting bhi ruk jati hai, aur dobara play karne par wahin se continue hoti hai. Is tab ko open aur visible rakhein. Auto Split ab by default fast engine (hardware encoder, parallel clips) use karta hai. Live mode on karein to video play hote hue real-time record hoti hai (slow, lekin preview aur pause kaam karte hain). Quick Split bina play kiye clips banata hai. Mode 'Exact' mein seconds aur aspect ratio dono apply hoti hain (har frame hardware encoder se guzarta hai, to speed PC par depend karti hai; status mein asli speed dikhti hai). Rotate buttons video ko kisi bhi degree par ghumate hain (Instant mode sirf 90/180/270 par chalta hai, custom degree ke liye Exact use hota hai). Mode 'Instant' lossless keyframe cut karta hai: bijli jaisa tez, lekin lengths 1-8 sec upar neeche ho sakti hain aur ratio Original rehta hai. Dono H.264 MP4/MOV ke liye hain.</p>
+    <p class="hint">Split ke dauran video pause karein to splitting bhi ruk jati hai, aur dobara play karne par wahin se continue hoti hai. Is tab ko open aur visible rakhein. Auto Split ab by default fast engine (hardware encoder, parallel clips) use karta hai. Live mode on karein to video play hote hue real-time record hoti hai (slow, lekin preview aur pause kaam karte hain). Quick Split bina play kiye clips banata hai. Mode 'Exact' mein seconds aur aspect ratio dono apply hoti hain (har frame hardware encoder se guzarta hai, to speed PC par depend karti hai; status mein asli speed dikhti hai). Captions on hon to clips Exact ya Live mode mein hi bantay hain (Instant mode captions nahi laga sakta). Rotate buttons video ko kisi bhi degree par ghumate hain (Instant mode sirf 90/180/270 par chalta hai, custom degree ke liye Exact use hota hai). Mode 'Instant' lossless keyframe cut karta hai: bijli jaisa tez, lekin lengths 1-8 sec upar neeche ho sakti hain aur ratio Original rehta hai. Dono H.264 MP4/MOV ke liye hain.</p>
   </div>
 
   <div class="panel" id="resultPanel" style="display:none;">
@@ -271,6 +316,13 @@
   const quickMode = document.getElementById('quickMode');
   const liveMode = document.getElementById('liveMode');
   const rotInput = document.getElementById('rotDeg');
+  const capOn = document.getElementById('capOn');
+  const capStyle = document.getElementById('capStyle');
+  const capPos = document.getElementById('capPos');
+  const capModel = document.getElementById('capModel');
+  const capGen = document.getElementById('capGen');
+  const capStatus = document.getElementById('capStatus');
+  const capCanvas = document.getElementById('capCanvas');
   const removeBtn = document.getElementById('removeBtn');
   let runToken = 0;
   let partEnding = false;
@@ -441,6 +493,90 @@
     timeText.innerText = '0:00 / 0:00';
   }
 
+
+  /* ---- captions UI ---- */
+  let capWords = null;
+  let capKey = '';
+  let capBusy = false;
+  let capMemo = null;
+
+  function setCapStatus(msg, kind) {
+    capStatus.className = kind || '';
+    capStatus.innerText = msg;
+  }
+
+  function capFileKey() {
+    return selectedFile ? selectedFile.name + '|' + selectedFile.size + '|' + selectedFile.lastModified + '|' + capModel.value : '';
+  }
+
+  function currentCap() {
+    if (!capOn.checked || !capWords || capKey !== capFileKey() || capWords.length === 0) return null;
+    if (capMemo && capMemo.words === capWords && capMemo.style === capStyle.value && capMemo.pos === capPos.value) return capMemo.cap;
+    const c = makeCap(capWords, capStyle.value, capPos.value);
+    capMemo = { words: capWords, style: capStyle.value, pos: capPos.value, cap: c };
+    return c;
+  }
+
+  async function generateCaptions() {
+    if (!selectedFile || capBusy) return false;
+    capBusy = true;
+    captionAbort = false;
+    capGen.disabled = true;
+    splitBtn.disabled = true;
+    quickBtn.disabled = true;
+    try {
+      let words;
+      try {
+        words = await transcribeFile(selectedFile, capModel.value, function (m) { setCapStatus(m, 'work'); }, false);
+      } catch (err) {
+        if (captionAbort) throw err;
+        setCapStatus('GPU mode fail hua, CPU mode try ho raha hai...', 'work');
+        words = await transcribeFile(selectedFile, capModel.value, function (m) { setCapStatus(m, 'work'); }, true);
+      }
+      capWords = words;
+      capKey = capFileKey();
+      capMemo = null;
+      if (words.length > 0) setCapStatus('Captions ready: ' + words.length + ' words. Template badalne par preview mein foran dikhta hai.', 'ok');
+      else setCapStatus('Is video mein bolti hui awaaz nahi mili, captions nahi lagenge.', 'err');
+      return true;
+    } catch (err) {
+      setCapStatus('Captions nahi ban sake: ' + (err && err.message ? err.message : 'error') + ' (Internet check karein, model pehli baar download hota hai.)', 'err');
+      return false;
+    } finally {
+      capBusy = false;
+      capGen.disabled = !selectedFile;
+      splitBtn.disabled = !videoReady;
+      quickBtn.disabled = !selectedFile;
+    }
+  }
+
+  async function ensureCaptions() {
+    if (!capOn.checked || !selectedFile) return true;
+    if (capWords && capKey === capFileKey()) return true;
+    return await generateCaptions();
+  }
+
+  capGen.addEventListener('click', function () { generateCaptions(); });
+
+  const sampleWords = 'Your captions will look like this'.split(' ').map(function (w, i) { return { w: w, s: i * 0.5, e: i * 0.5 + 0.48 }; });
+
+  function drawCapPreview() {
+    const w = capCanvas.clientWidth;
+    const h = capCanvas.clientHeight;
+    if (!w || !h) return;
+    if (capCanvas.width !== w || capCanvas.height !== h) {
+      capCanvas.width = w;
+      capCanvas.height = h;
+    }
+    const cx = capCanvas.getContext('2d');
+    cx.clearRect(0, 0, w, h);
+    if (!capOn.checked || !videoReady) return;
+    const c = currentCap();
+    if (c) drawCaption(cx, w, h, previewVideo.currentTime, c);
+    else if (!capWords || capKey !== capFileKey()) drawCaption(cx, w, h, (performance.now() / 1000) % 3.2, makeCap(sampleWords, capStyle.value, capPos.value));
+  }
+  setInterval(drawCapPreview, 80);
+
   function removeVideo() {
     if (isRunning) stopBtn.click();
     runToken++;
@@ -459,6 +595,11 @@
     player.style.maxWidth = '100%';
     resetVideoState();
     removeBtn.style.display = 'none';
+    captionAbort = true;
+    capWords = null;
+    capMemo = null;
+    capGen.disabled = true;
+    setCapStatus('Video load karein, phir Generate Captions dabayein. Template ka sample preview mein dikhta hai.', '');
     rotInput.value = 0;
     splitBtn.disabled = true;
     quickBtn.disabled = true;
@@ -472,6 +613,10 @@
     resetVideoState();
     selectedFile = file;
     quickBtn.disabled = false;
+    capGen.disabled = false;
+    capWords = null;
+    capMemo = null;
+    setCapStatus('Captions abhi nahi bane. Generate Captions dabayein (ya split par khud ban jayenge).', '');
     removeBtn.style.display = 'inline-block';
     fileName.innerText = file.name + ' (' + (file.size / 1048576).toFixed(1) + ' MB)';
     dropText.innerText = 'Video select ho gayi';
@@ -786,8 +931,13 @@
       const tr = readTrack(mdv, trak);
       if (tr) tracks.push(tr);
     });
-    const v = tracks.find(function (t) { return t.kind === 'vide'; });
-    if (!v || v.n === 0) throw new Error('Video track nahi mila.');
+    const v = tracks.find(function (t) { return t.kind === (opts.audioOnly ? 'soun' : 'vide'); });
+    if (!v || v.n === 0) throw new Error(opts.audioOnly ? 'Audio track nahi mila.' : 'Video track nahi mila.');
+    if (opts.audioOnly) {
+      const keep = tracks.filter(function (t) { return t.kind === 'soun'; });
+      tracks.length = 0;
+      keep.forEach(function (t) { tracks.push(t); });
+    }
 
     const kfs = [];
     for (let i = 0; i < v.n; i++) if (!v.syncSet || v.syncSet.has(i)) kfs.push(i);
@@ -952,6 +1102,10 @@
       return { blob: new Blob(blobParts, { type: 'video/mp4' }), duration: movieDur / movieTs };
     }
 
+    if (opts.audioOnly) {
+      return { duration: vDur, makeAll: function () { return assemble(function (tr) { return { a: 0, b: tr.n }; }, null); } };
+    }
+
     /* ---------- Mode 1: keyframe cut (stream copy, lossless, no crop) ---------- */
     if (!opts.exact) {
       if (userRot % 90 !== 0) throw new Error('Instant mode sirf 90/180/270 rotation support karta hai.');
@@ -1000,7 +1154,7 @@
     const cb = cropFor(oddRot ? srcH : srcW, oddRot ? srcW : srcH, opts.ratio || 'original');
     const crop = totalRot === 0 ? cropFor(srcW, srcH, opts.ratio || 'original') : { sx: 0, sy: 0, w: cb.w, h: cb.h };
     const fps = Math.max(1, v.n / vDur);
-    const ctx = { file: file, v: v, desc: avcDesc, srcW: srcW, srcH: srcH, crop: crop, rot: totalRot };
+    const ctx = { file: file, v: v, desc: avcDesc, srcW: srcW, srcH: srcH, crop: crop, rot: totalRot, cap: opts.captions || null };
     let encodeSeg = opts.encodeSegment;
     if (!encodeSeg) {
       if (typeof VideoDecoder === 'undefined' || typeof VideoEncoder === 'undefined') throw new Error('Browser mein WebCodecs nahi hai.');
@@ -1136,12 +1290,13 @@
 
     const crop = ctx.crop;
     const rot = ctx.rot || 0;
-    const needCrop = rot === 0 && (crop.w !== ctx.srcW || crop.h !== ctx.srcH);
+    const useCanvas = rot !== 0 || !!ctx.cap;
+    const needCrop = !useCanvas && (crop.w !== ctx.srcW || crop.h !== ctx.srcH);
     let oc = null;
     let octx = null;
     let rcos = 1;
     let rsin = 0;
-    if (rot !== 0) {
+    if (useCanvas) {
       oc = new OffscreenCanvas(crop.w, crop.h);
       octx = oc.getContext('2d');
       const rad = rot * Math.PI / 180;
@@ -1184,9 +1339,10 @@
               init.displayHeight = crop.h;
             }
             let f2;
-            if (rot !== 0) {
+            if (useCanvas) {
               octx.setTransform(rcos, rsin, -rsin, rcos, crop.w / 2, crop.h / 2);
               octx.drawImage(frame, -frame.displayWidth / 2, -frame.displayHeight / 2, frame.displayWidth, frame.displayHeight);
+              if (ctx.cap) drawCaption(octx, crop.w, crop.h, pts / 1000000, ctx.cap);
               f2 = new VideoFrame(oc, { timestamp: pts - t0us, duration: fdur });
             } else {
               f2 = new VideoFrame(frame, init);
@@ -1271,9 +1427,265 @@
     return nextToAdd;
   }
   /* QS-END */
+  /* CAP-START: captions (templates, drawing, voice to text) */
+  const CAP_STYLES = new Map();
+  CAP_STYLES.set('classic', { family: 'Arial, Helvetica, sans-serif', weight: 700, size: 0.052, fill: '#ffffff', hi: null, stroke: '#000000', strokeF: 0.16, box: null, glow: null, upper: false, maxWords: 7 });
+  CAP_STYLES.set('karaoke', { family: 'Arial, Helvetica, sans-serif', weight: 800, size: 0.06, fill: '#ffffff', hi: '#ffe14d', stroke: '#000000', strokeF: 0.18, box: null, glow: null, upper: false, maxWords: 4 });
+  CAP_STYLES.set('pop', { family: 'Impact, "Arial Black", Arial, sans-serif', weight: 400, size: 0.105, fill: '#ffffff', hi: '#39ff88', stroke: '#000000', strokeF: 0.2, box: null, glow: null, upper: true, maxWords: 2 });
+  CAP_STYLES.set('boxed', { family: 'Arial, Helvetica, sans-serif', weight: 700, size: 0.05, fill: '#ffffff', hi: null, stroke: null, strokeF: 0, box: 'rgba(0,0,0,0.74)', glow: null, upper: false, maxWords: 6 });
+  CAP_STYLES.set('neon', { family: 'Arial, Helvetica, sans-serif', weight: 800, size: 0.062, fill: '#eaffff', hi: '#ff5cf4', stroke: null, strokeF: 0, box: null, glow: '#00e5ff', upper: false, maxWords: 4 });
+  CAP_STYLES.set('minimal', { family: 'Arial, Helvetica, sans-serif', weight: 600, size: 0.04, fill: '#ffffff', hi: null, stroke: '#000000', strokeF: 0.08, box: null, glow: null, upper: false, maxWords: 8 });
+
+  function groupWords(words, maxWords) {
+    const groups = [];
+    let cur = [];
+    function flush() {
+      if (cur.length > 0) {
+        groups.push({ s: cur.at(0).s, e: cur.at(cur.length - 1).e, end: 0, words: cur });
+        cur = [];
+      }
+    }
+    words.forEach(function (w) {
+      if (cur.length > 0) {
+        const prev = cur.at(cur.length - 1);
+        if (w.s - prev.e > 0.7 || cur.length >= maxWords || (w.e - cur.at(0).s) > 4) flush();
+      }
+      cur.push(w);
+      if ('.?!'.indexOf(w.w.slice(-1)) >= 0) flush();
+    });
+    flush();
+    groups.forEach(function (g, i) {
+      const next = i + 1 < groups.length ? groups.at(i + 1).s : Infinity;
+      g.end = Math.max(g.e, Math.min(g.e + 0.4, next));
+    });
+    return groups;
+  }
+
+  function makeCap(words, styleKey, pos) {
+    const st = CAP_STYLES.get(styleKey) || CAP_STYLES.get('classic');
+    return { groups: groupWords(words, st.maxWords), style: st, pos: pos || 'bottom' };
+  }
+
+  function findGroup(groups, t) {
+    let lo = 0;
+    let hi = groups.length - 1;
+    let found = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (groups.at(mid).s - 0.05 <= t) { found = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    if (found < 0) return null;
+    const g = groups.at(found);
+    return t < g.end ? g : null;
+  }
+
+  function drawCaption(ctx, W, H, t, cap) {
+    if (!cap || !cap.groups || cap.groups.length === 0) return;
+    const g = findGroup(cap.groups, t);
+    if (!g) return;
+    const st = cap.style;
+    const base = Math.min(W, H * 1.1);
+    const boost = H > W ? 1.4 : 1;
+    const fs = Math.max(12, Math.round(base * st.size * boost));
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = st.weight + ' ' + fs + 'px ' + st.family;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.lineJoin = 'round';
+
+    const maxW = W * 0.88;
+    const spaceW = ctx.measureText(' ').width;
+    let cur = 0;
+    g.words.forEach(function (w, i) { if (w.s <= t) cur = i; });
+    const items = g.words.map(function (w, i) {
+      const text = st.upper ? w.w.toUpperCase() : w.w;
+      return { text: text, w: ctx.measureText(text).width, idx: i };
+    });
+
+    const lines = [];
+    let line = { items: [], width: 0 };
+    items.forEach(function (it) {
+      const add = (line.items.length > 0 ? spaceW : 0) + it.w;
+      if (line.items.length > 0 && line.width + add > maxW) {
+        lines.push(line);
+        line = { items: [], width: 0 };
+      }
+      line.width += (line.items.length > 0 ? spaceW : 0) + it.w;
+      line.items.push(it);
+    });
+    if (line.items.length > 0) lines.push(line);
+
+    const lh = fs * 1.22;
+    const blockH = lines.length * lh;
+    let yc = H * 0.8;
+    if (cap.pos === 'middle') yc = H * 0.5;
+    else if (cap.pos === 'top') yc = H * 0.2;
+    let top = yc - blockH / 2;
+    top = Math.max(H * 0.04, Math.min(top, H * 0.97 - blockH));
+
+    if (st.box) {
+      let mw = 0;
+      lines.forEach(function (ln) { mw = Math.max(mw, ln.width); });
+      const pad = fs * 0.35;
+      const bx = (W - mw) / 2 - pad;
+      const by = top - pad * 0.5;
+      const bw = mw + pad * 2;
+      const bh = blockH + pad;
+      const r = fs * 0.3;
+      ctx.fillStyle = st.box;
+      ctx.beginPath();
+      ctx.moveTo(bx + r, by);
+      ctx.arcTo(bx + bw, by, bx + bw, by + bh, r);
+      ctx.arcTo(bx + bw, by + bh, bx, by + bh, r);
+      ctx.arcTo(bx, by + bh, bx, by, r);
+      ctx.arcTo(bx, by, bx + bw, by, r);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    lines.forEach(function (ln, li) {
+      const y = top + (li + 0.5) * lh;
+      let x = (W - ln.width) / 2;
+      ln.items.forEach(function (it) {
+        const isHi = st.hi && it.idx === cur;
+        const color = isHi ? st.hi : st.fill;
+        if (st.stroke) {
+          ctx.lineWidth = fs * st.strokeF;
+          ctx.strokeStyle = st.stroke;
+          ctx.strokeText(it.text, x, y);
+        }
+        if (st.glow) {
+          ctx.shadowColor = isHi ? st.hi : st.glow;
+          ctx.shadowBlur = fs * 0.5;
+          ctx.fillStyle = color;
+          ctx.fillText(it.text, x, y);
+          ctx.fillText(it.text, x, y);
+          ctx.shadowBlur = 0;
+        } else {
+          if (!st.stroke && !st.box) {
+            ctx.shadowColor = 'rgba(0,0,0,0.75)';
+            ctx.shadowBlur = fs * 0.2;
+          }
+          ctx.fillStyle = color;
+          ctx.fillText(it.text, x, y);
+          ctx.shadowBlur = 0;
+        }
+        x += it.w + spaceW;
+      });
+    });
+    ctx.restore();
+  }
+
+  /* ---- voice to text (Whisper, browser ke andar, free) ---- */
+  let asrPromise = null;
+  let asrKey = '';
+  let captionAbort = false;
+
+  async function getAsr(modelId, onStatus, wasmOnly) {
+    const key = modelId + (wasmOnly ? '|cpu' : '|auto');
+    if (asrPromise && asrKey === key) return asrPromise;
+    asrKey = key;
+    asrPromise = (async function () {
+      onStatus('AI model load ho raha hai (pehli baar download hoga, internet chahiye)...');
+      const mod = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.6');
+      mod.env.allowLocalModels = false;
+      const prog = function (p) {
+        if (p && p.status === 'progress' && typeof p.progress === 'number') onStatus('Model download: ' + Math.round(p.progress) + '%');
+      };
+      if (!wasmOnly && navigator.gpu) {
+        try {
+          return await mod.pipeline('automatic-speech-recognition', modelId, { device: 'webgpu', dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' }, progress_callback: prog });
+        } catch (err) {}
+      }
+      return await mod.pipeline('automatic-speech-recognition', modelId, { progress_callback: prog });
+    })();
+    asrPromise.catch(function () { asrPromise = null; });
+    return asrPromise;
+  }
+
+  async function getAudio16k(file, onStatus) {
+    onStatus('Audio nikal rahi hai...');
+    let buf;
+    try {
+      const pl = await planQuickSplit(file, 1, { audioOnly: true });
+      buf = await pl.makeAll().blob.arrayBuffer();
+    } catch (err) {
+      if (file.size > 400 * 1048576) throw new Error('Is file se audio nahi nikal saki. MP4/MOV ya chhoti file try karein.');
+      buf = await file.arrayBuffer();
+    }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ac = new AC({ sampleRate: 16000 });
+    const decoded = await ac.decodeAudioData(buf);
+    try { ac.close(); } catch (err) {}
+    const off = new OfflineAudioContext(1, Math.max(1, decoded.length), 16000);
+    const src = off.createBufferSource();
+    src.buffer = decoded;
+    src.connect(off.destination);
+    src.start();
+    const rendered = await off.startRendering();
+    return rendered.getChannelData(0);
+  }
+
+  function rmsOf(arr) {
+    let sum = 0;
+    arr.forEach(function (v) { sum += v * v; });
+    return Math.sqrt(sum / Math.max(1, arr.length));
+  }
+
+  function quietPoint(audio, from, to) {
+    const step = 800;
+    let best = to;
+    let bestE = Infinity;
+    for (let p = from; p + step <= to; p += step) {
+      const e = rmsOf(audio.subarray(p, p + step));
+      if (e < bestE) { bestE = e; best = p + Math.round(step / 2); }
+    }
+    return best;
+  }
+
+  async function transcribeFile(file, modelId, onStatus, wasmOnly) {
+    const audio = await getAudio16k(file, onStatus);
+    const asr = await getAsr(modelId, onStatus, wasmOnly);
+    const SR = 16000;
+    const total = audio.length;
+    const words = [];
+    let pos = 0;
+    while (pos < total) {
+      if (captionAbort) throw new Error('Captions cancel ho gaye.');
+      let end = Math.min(total, pos + 30 * SR);
+      if (end < total) end = quietPoint(audio, end - 3 * SR, end);
+      if (end <= pos) end = Math.min(total, pos + 30 * SR);
+      const seg = audio.subarray(pos, end);
+      onStatus('Captions ban rahe hain: ' + Math.round((pos / total) * 100) + '% (' + words.length + ' words)');
+      await new Promise(function (r) { setTimeout(r, 0); });
+      if (rmsOf(seg) > 0.004) {
+        const out = await asr(seg, { return_timestamps: 'word' });
+        const off = pos / SR;
+        (out.chunks || []).forEach(function (c) {
+          const txt = (c.text || '').trim();
+          if (!txt) return;
+          const f = txt.charAt(0);
+          if (f === '[' || f === '(' || f === '*') return;
+          const t0 = c.timestamp ? c.timestamp.at(0) : 0;
+          const t1 = c.timestamp ? c.timestamp.at(1) : 0;
+          const s = off + (t0 || 0);
+          let e = off + (t1 || ((t0 || 0) + 0.3));
+          if (e <= s) e = s + 0.25;
+          words.push({ w: txt, s: s, e: e });
+        });
+      }
+      pos = end;
+    }
+    return words;
+  }
+  /* CAP-END */
 
   async function runQuick(modeVal, strict) {
     if (!selectedFile || isRunning) return false;
+    if (capBusy) return true;
+    if (capOn.checked && !(await ensureCaptions())) return true;
     const chunkSec = getChunkSeconds();
     if (chunkSec <= 0) {
       setStatus('Split value 0 se zyada honi chahiye.', 'err');
@@ -1281,6 +1693,7 @@
     }
     const ratioVal = aspectRatio.value;
     const rotDeg = getRot();
+    const cap = currentCap();
     let wantExact = modeVal === 'exact';
     const myRun = ++runToken;
     isRunning = true;
@@ -1296,9 +1709,9 @@
     previewVideo.pause();
     let exactMode = false;
     let note = '';
-    if (!wantExact && rotDeg % 90 !== 0) {
+    if (!wantExact && (rotDeg % 90 !== 0 || cap)) {
       wantExact = true;
-      note = ' (Custom degree ki wajah se Exact mode use hua.)';
+      note = cap ? ' (Captions ke liye Exact mode use hua.)' : ' (Custom degree ki wajah se Exact mode use hua.)';
     }
     try {
       setStatus('Quick Split: file analyze ho rahi hai...', 'work');
@@ -1306,7 +1719,7 @@
       if (wantExact) {
         if (typeof VideoDecoder !== 'undefined' && typeof VideoEncoder !== 'undefined') {
           try {
-            plan = await planQuickSplit(selectedFile, chunkSec, { exact: true, ratio: ratioVal, rotate: rotDeg });
+            plan = await planQuickSplit(selectedFile, chunkSec, { exact: true, ratio: ratioVal, rotate: rotDeg, captions: cap });
             exactMode = true;
           } catch (err) {
             note = ' Exact mode nahi chal saka (' + (err && err.message ? err.message : 'error') + '), keyframe cut use hua.';
@@ -1314,6 +1727,10 @@
         } else {
           note = ' Is browser mein WebCodecs nahi hai (Chrome ya Edge use karein), keyframe cut use hua.';
         }
+      }
+      if (cap && !exactMode) {
+        if (strict) return false;
+        throw new Error('Captions ke liye Exact mode (Chrome ya Edge) chahiye. Live mode on karke try karein.');
       }
       if (strict && !exactMode) return false;
       if (!plan) plan = await planQuickSplit(selectedFile, chunkSec, { rotate: rotDeg });
@@ -1347,6 +1764,7 @@
       } catch (err) {
         if (!exactMode) throw err;
         if (strict) return false;
+        if (cap) throw err;
         exactMode = false;
         note = ' Exact mode fail hua (' + (err && err.message ? err.message : 'error') + '), keyframe cut use hua.';
         plan = await planQuickSplit(selectedFile, chunkSec, { rotate: rotDeg });
@@ -1585,6 +2003,8 @@
       setStatus('Pehle video load hone dein.', 'err');
       return;
     }
+    if (capBusy) return;
+    if (capOn.checked && !(await ensureCaptions())) return;
     if (!liveMode.checked && typeof VideoDecoder !== 'undefined' && typeof VideoEncoder !== 'undefined') {
       const handled = await runQuick('exact', true);
       if (handled) return;
@@ -1637,6 +2057,7 @@
       canvas.width = RL ? RL.w : crop.w;
       canvas.height = RL ? RL.h : crop.h;
       const ctx = canvas.getContext('2d');
+      const liveCap = currentCap();
 
       function drawFrame() {
         if (!drawActive) return;
@@ -1646,6 +2067,7 @@
         } else {
           ctx.drawImage(video, crop.sx, crop.sy, crop.w, crop.h, 0, 0, crop.w, crop.h);
         }
+        if (liveCap) drawCaption(ctx, canvas.width, canvas.height, video.currentTime, liveCap);
         requestAnimationFrame(drawFrame);
       }
       drawFrame();
