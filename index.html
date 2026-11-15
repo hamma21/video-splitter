@@ -62,7 +62,7 @@
   label.chk input { width: 18px; height: 18px; accent-color: var(--accent); }
   .saveRow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
   .saveRow .btn { padding: 8px 14px; font-size: 14px; }
-  .dl-btns { display: flex; gap: 6px; flex: none; }
+  .dl-btns { display: flex; gap: 6px; flex: none; flex-wrap: wrap; }
   button.dl-btn { border: none; cursor: pointer; font-size: 14px; font-family: inherit; }
   button.dl-btn.alt { background: #2f3b4d; color: var(--text); }
   button.dl-btn:hover { filter: brightness(1.15); }
@@ -173,8 +173,8 @@
   </div>
 
   <div class="panel" id="capPanel">
-    <h2>3. Captions (English, awaaz se auto)</h2>
-    <label style="display:flex;align-items:center;gap:10px;color:var(--text);font-size:15px;margin:0 0 14px;cursor:pointer;"><input type="checkbox" id="capOn" style="width:18px;height:18px;accent-color:var(--accent);"> Clips mein captions add karein</label>
+    <h2>3. Captions (awaaz se auto)</h2>
+    <label style="display:flex;align-items:center;gap:10px;color:var(--text);font-size:15px;margin:0 0 14px;cursor:pointer;"><input type="checkbox" id="capOn" style="width:18px;height:18px;accent-color:var(--accent);"> Awaaz se captions auto-generate karke clips mein add karein</label>
     <div class="grid">
       <div>
         <label for="capStyle">Caption template</label>
@@ -198,18 +198,20 @@
     </div>
     <div class="grid" style="margin-top:12px;">
       <div>
-        <label for="capModel">AI model (voice to text)</label>
+        <label for="capModel">AI model (speech language)</label>
         <select id="capModel">
-          <option value="Xenova/whisper-tiny.en">Fast (tiny, ~40 MB)</option>
-          <option value="Xenova/whisper-base.en">Better accuracy (base, ~80 MB)</option>
+          <option value="Xenova/whisper-tiny">Auto language (tiny, ~40 MB)</option>
+          <option value="Xenova/whisper-base">Auto language, better accuracy (base, ~80 MB)</option>
+          <option value="Xenova/whisper-tiny.en">English only (tiny, ~40 MB)</option>
+          <option value="Xenova/whisper-base.en">English only, better accuracy (base, ~80 MB)</option>
         </select>
       </div>
       <div>
         <label>&nbsp;</label>
-        <button class="btn primary" id="capGen" type="button" disabled>Generate Captions</button>
+        <button class="btn primary" id="capGen" type="button" disabled>Generate / Regenerate Captions</button>
       </div>
     </div>
-    <p id="capStatus">Video load karein, phir Generate Captions dabayein. Template ka sample preview mein dikhta hai.</p>
+    <p id="capStatus">Checkbox tick karte hi video ki awaaz se captions banenge. Default model boli jane wali zubaan khud detect karta hai.</p>
   </div>
 
   <div class="panel">
@@ -337,6 +339,39 @@
   const modalVideo = document.getElementById('modalVideo');
   const modalTitle = document.getElementById('modalTitle');
   const modalClose = document.getElementById('modalClose');
+  const editorSessions = new Map();
+
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (!data || data.type !== 'video-editor-ready' || typeof data.token !== 'string') return;
+    const session = editorSessions.get(data.token);
+    if (!session || event.source !== session.window) return;
+    try {
+      session.window.postMessage({
+        type: 'video-editor-load',
+        token: data.token,
+        blob: session.blob,
+        name: session.name
+      }, '*');
+      editorSessions.delete(data.token);
+    } catch (err) {
+      editorSessions.delete(data.token);
+      setStatus('Editor mein video open nahi ho saki: ' + (err && err.message ? err.message : 'error'), 'err');
+    }
+  });
+
+  function openEditor(blob, name) {
+    const editorUrl = new URL('editor.html', window.location.href);
+    const token = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    editorUrl.hash = token;
+    const tab = window.open('about:blank', '_blank');
+    if (!tab) {
+      setStatus('Editor tab open nahi hui. Browser mein pop-ups allow karke dobara try karein.', 'err');
+      return;
+    }
+    editorSessions.set(token, { window: tab, blob: blob, name: name });
+    tab.location.href = editorUrl.href;
+  }
 
   function setStatus(msg, kind) {
     statusText.className = kind || '';
@@ -499,6 +534,7 @@
   let capKey = '';
   let capBusy = false;
   let capMemo = null;
+  let captionJob = null;
 
   function setCapStatus(msg, kind) {
     capStatus.className = kind || '';
@@ -519,34 +555,50 @@
 
   async function generateCaptions() {
     if (!selectedFile || capBusy) return false;
+    const file = selectedFile;
+    const modelId = capModel.value;
+    const fileKey = capFileKey();
     capBusy = true;
     captionAbort = false;
     capGen.disabled = true;
     splitBtn.disabled = true;
     quickBtn.disabled = true;
-    try {
+    captionJob = (async function () {
       let words;
-      try {
-        words = await transcribeFile(selectedFile, capModel.value, function (m) { setCapStatus(m, 'work'); }, false);
-      } catch (err) {
-        if (captionAbort) throw err;
-        setCapStatus('GPU mode fail hua, CPU mode try ho raha hai...', 'work');
-        words = await transcribeFile(selectedFile, capModel.value, function (m) { setCapStatus(m, 'work'); }, true);
+      function reportProgress(message) {
+        if (file === selectedFile && fileKey === capFileKey()) setCapStatus(message, 'work');
       }
+      try {
+        words = await transcribeFile(file, modelId, reportProgress, false);
+      } catch (err) {
+        if (captionAbort || file !== selectedFile || fileKey !== capFileKey()) throw err;
+        setCapStatus('GPU mode fail hua, CPU mode try ho raha hai...', 'work');
+        words = await transcribeFile(file, modelId, reportProgress, true);
+      }
+      if (captionAbort || file !== selectedFile || fileKey !== capFileKey()) return false;
       capWords = words;
-      capKey = capFileKey();
+      capKey = fileKey;
       capMemo = null;
       if (words.length > 0) setCapStatus('Captions ready: ' + words.length + ' words. Template badalne par preview mein foran dikhta hai.', 'ok');
       else setCapStatus('Is video mein bolti hui awaaz nahi mili, captions nahi lagenge.', 'err');
       return true;
+    })();
+    try {
+      return await captionJob;
     } catch (err) {
-      setCapStatus('Captions nahi ban sake: ' + (err && err.message ? err.message : 'error') + ' (Internet check karein, model pehli baar download hota hai.)', 'err');
+      if (file === selectedFile && fileKey === capFileKey() && !captionAbort) setCapStatus('Captions nahi ban sake: ' + (err && err.message ? err.message : 'error') + ' (Internet check karein, model pehli baar download hota hai.)', 'err');
       return false;
     } finally {
       capBusy = false;
+      captionJob = null;
       capGen.disabled = !selectedFile;
       splitBtn.disabled = !videoReady;
       quickBtn.disabled = !selectedFile;
+      if (capOn.checked && selectedFile && videoReady && (file !== selectedFile || fileKey !== capFileKey())) {
+        setTimeout(function () {
+          if (!capBusy && capOn.checked && selectedFile && videoReady && (!capWords || capKey !== capFileKey())) generateCaptions();
+        }, 0);
+      }
     }
   }
 
@@ -556,7 +608,39 @@
     return await generateCaptions();
   }
 
-  capGen.addEventListener('click', function () { generateCaptions(); });
+  capOn.addEventListener('change', function () {
+    if (!capOn.checked) {
+      setCapStatus('Captions off hain; checkbox dobara tick karein to awaaz se generate honge.', '');
+      return;
+    }
+    if (!selectedFile) {
+      setCapStatus('Pehle video select karein; load hote hi captions generate honge.', '');
+      return;
+    }
+    if (!videoReady) {
+      setCapStatus('Video load hote hi awaaz se captions generate honge.', 'work');
+      return;
+    }
+    if (capWords && capKey === capFileKey()) {
+      setCapStatus('Captions pehle se ready hain; split karne par clips mein add honge.', 'ok');
+      return;
+    }
+    generateCaptions();
+  });
+
+  capModel.addEventListener('change', function () {
+    capWords = null;
+    capKey = '';
+    capMemo = null;
+    if (!capOn.checked || !selectedFile) return;
+    if (videoReady) generateCaptions();
+    else setCapStatus('Video load hote hi selected model se captions generate honge.', 'work');
+  });
+
+  capGen.addEventListener('click', function () {
+    if (!capOn.checked) capOn.checked = true;
+    generateCaptions();
+  });
 
   const sampleWords = 'Your captions will look like this'.split(' ').map(function (w, i) { return { w: w, s: i * 0.5, e: i * 0.5 + 0.48 }; });
 
@@ -597,6 +681,7 @@
     removeBtn.style.display = 'none';
     captionAbort = true;
     capWords = null;
+    capKey = '';
     capMemo = null;
     capGen.disabled = true;
     setCapStatus('Video load karein, phir Generate Captions dabayein. Template ka sample preview mein dikhta hai.', '');
@@ -610,13 +695,15 @@
 
   function processFile(file) {
     if (!file || isRunning) return;
+    captionAbort = true;
     resetVideoState();
     selectedFile = file;
     quickBtn.disabled = false;
     capGen.disabled = false;
     capWords = null;
+    capKey = '';
     capMemo = null;
-    setCapStatus('Captions abhi nahi bane. Generate Captions dabayein (ya split par khud ban jayenge).', '');
+    setCapStatus(capOn.checked ? 'Video load hote hi awaaz se captions auto-generate honge.' : 'Captions ke liye checkbox tick karein; phir awaaz se auto-generate honge.', '');
     removeBtn.style.display = 'inline-block';
     fileName.innerText = file.name + ' (' + (file.size / 1048576).toFixed(1) + ' MB)';
     dropText.innerText = 'Video select ho gayi';
@@ -642,6 +729,7 @@
     ctrlBar.style.display = 'flex';
     updatePlayUI();
     updateTime();
+    if (capOn.checked) generateCaptions();
   });
 
   previewVideo.addEventListener('error', function () {
@@ -1974,8 +2062,15 @@
       }
     });
 
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'dl-btn alt';
+    edit.innerText = 'Open in editor';
+    edit.addEventListener('click', function () { openEditor(blob, name); });
+
     btns.appendChild(pv);
     btns.appendChild(dl);
+    btns.appendChild(edit);
     div.appendChild(span);
     div.appendChild(btns);
     downloadsList.appendChild(div);
