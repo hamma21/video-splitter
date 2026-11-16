@@ -3,277 +3,373 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Auto Video Splitter v4</title>
+<title>Auto Video Splitter</title>
 <style>
   :root {
-    --bg: #12161c;
-    --panel: #1b212a;
-    --line: #2d3644;
-    --text: #e8edf3;
-    --muted: #93a0b2;
-    --accent: #3ddc97;
-    --accent-ink: #06281a;
+    --bg: #0b0d10;
+    --panel: #12151a;
+    --panel2: #0d1014;
+    --line: #1f252d;
+    --line2: #2a313b;
+    --text: #e9edf2;
+    --muted: #8b97a8;
+    --blue: #7fb4d8;
+    --lime: #d4f33a;
+    --lime-ink: #151f06;
+    --lime-dim: #232d0c;
+    --teal: #2fe0b0;
+    --accent: #d4f33a;
+    --accent-ink: #151f06;
     --danger: #ff6b6b;
     --warn: #ffc857;
+    --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
   }
   * { box-sizing: border-box; }
+  html { color-scheme: dark; }
   body {
-    margin: 0; padding: 24px 16px 60px;
-    background: var(--bg); color: var(--text);
-    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-    line-height: 1.5;
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: Inter, "Segoe UI", system-ui, -apple-system, sans-serif; line-height: 1.5;
   }
-  .wrap { max-width: 820px; margin: 0 auto; }
-  h1 { font-size: 26px; margin: 0 0 4px; font-weight: 700; }
-  .sub { color: var(--muted); margin: 0 0 22px; font-size: 15px; }
+  svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .sr { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin-bottom: 16px; }
-  .panel h2 { font-size: 16px; margin: 0 0 12px; font-weight: 600; }
+  /* header */
+  .top { border-bottom: 1px solid var(--line); }
+  .top .in { max-width: 1180px; margin: 0 auto; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .logo { width: 38px; height: 38px; border-radius: 11px; background: var(--lime); color: var(--lime-ink); display: grid; place-items: center; font-size: 19px; flex: none; }
+  .brand b { display: block; font-size: 16px; font-weight: 700; line-height: 1.2; }
+  .brand span { display: block; font-size: 12px; color: var(--muted); }
+  .badge { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); border: 1px solid var(--line2); border-radius: 999px; padding: 6px 12px; background: var(--panel2); white-space: nowrap; }
+  .badge svg { color: var(--teal); font-size: 14px; }
 
-  #dropZone {
-    border: 2px dashed var(--line); border-radius: 10px;
-    padding: 26px 16px; text-align: center; transition: border-color .15s, background .15s;
-  }
-  #dropZone.over { border-color: var(--accent); background: rgba(61,220,151,.08); }
-  #dropZone p { margin: 0 0 12px; color: var(--muted); }
-  #fileName { color: var(--text); font-weight: 600; word-break: break-all; }
+  .main { max-width: 1180px; margin: 0 auto; padding: 22px 24px 70px; }
+  .intro { color: var(--blue); font-size: 14px; max-width: 520px; margin: 0 0 20px; }
+  .topbar { margin: 0 0 16px; min-height: 0; }
+  .grid2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 24px; align-items: start; }
+  .col { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+  @media (max-width: 920px) { .grid2 { grid-template-columns: 1fr; } .top .in, .main { padding-left: 14px; padding-right: 14px; } .badge { display: none; } }
+
+  /* cards */
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .card > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+  .card > header h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 15px; font-weight: 650; }
+  .step { width: 26px; height: 26px; border-radius: 7px; background: var(--lime-dim); color: var(--lime); font: 700 12px var(--mono); display: grid; place-items: center; border: 1px solid #36441a; }
+  .card .body { padding: 18px; }
+  .hmeta { font: 12px var(--mono); color: var(--muted); }
+  .lbl { display: block; font: 600 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+  .lbl.sp { margin-top: 18px; }
+
+  /* dropzone */
+  #dropZone { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 8px; min-height: 300px; border: 1.5px dashed #2b3440; border-radius: 12px; cursor: pointer; padding: 24px; transition: border-color .15s, background .15s; margin: 0; color: inherit; }
+  #dropZone:hover, #dropZone.over { border-color: var(--lime); background: rgba(212,243,58,.04); }
+  #dropZone.loaded { min-height: 0; padding: 14px; flex-direction: row; justify-content: flex-start; text-align: left; gap: 14px; }
+  #dropZone.loaded .dzSub, #dropZone.loaded .pill { display: none; }
+  #dropZone.loaded .dzIcon { width: 44px; height: 44px; font-size: 20px; }
+  .dzIcon { width: 60px; height: 60px; border-radius: 16px; background: #0f1318; border: 1px solid var(--line2); color: var(--lime); display: grid; place-items: center; font-size: 26px; margin-bottom: 8px; }
+  #dropText { margin: 0; font-size: 19px; font-weight: 700; color: #fff; }
+  .dzSub { margin: 0; font-size: 13.5px; color: var(--blue); }
+  .pill { font: 600 10.5px var(--mono); letter-spacing: .16em; color: var(--muted); border: 1px solid var(--line2); border-radius: 999px; padding: 5px 12px; margin-top: 10px; }
+  #fileName { margin: 0; font-size: 13px; color: var(--text); word-break: break-all; }
+  #fileName:empty { display: none; }
   #fileInput { display: none; }
+  .note { margin: 14px 0 0; font-size: 12px; color: var(--muted); text-align: center; }
 
-  .btn {
-    display: inline-block; cursor: pointer; border: 1px solid var(--line);
-    background: #263040; color: var(--text); padding: 10px 18px;
-    font-size: 15px; font-weight: 600; border-radius: 8px;
-  }
-  .btn:hover { border-color: var(--accent); }
-  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  /* buttons */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; border: 1px solid var(--line2); background: #171c23; color: var(--text); padding: 10px 16px; font: 600 14px inherit; font-family: inherit; border-radius: 10px; }
+  .btn:hover { border-color: #3b4552; }
+  .btn.primary { background: var(--lime); color: var(--lime-ink); border-color: var(--lime); }
+  .btn.primary:hover { filter: brightness(1.06); }
   .btn.danger { background: var(--danger); color: #3a0a0a; border-color: var(--danger); }
-  .btn:disabled { opacity: .45; cursor: not-allowed; }
-  .btn:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn.sm { padding: 7px 12px; font-size: 13px; border-radius: 8px; }
+  .btn.wide { width: 100%; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; filter: none; }
+  .btn:focus-visible, .chips button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--lime); outline-offset: 2px; }
 
-  .player {
-    position: relative; width: 100%; max-height: 420px;
-    margin: 0 auto; background: #000; border-radius: 8px; overflow: hidden;
-    aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center;
-  }
+  /* chips + segmented */
+  .chips { display: grid; gap: 8px; }
+  .chips.g2 { grid-template-columns: repeat(2, 1fr); } .chips.g3 { grid-template-columns: repeat(3, 1fr); } .chips.g4 { grid-template-columns: repeat(4, 1fr); }
+  .chips button { padding: 10px 6px; font: 600 12.5px inherit; font-family: inherit; color: var(--muted); background: #0f1318; border: 1px solid var(--line2); border-radius: 10px; cursor: pointer; }
+  .chips button:hover { color: var(--text); }
+  .chips button.on { color: var(--lime); border-color: var(--lime); background: rgba(212,243,58,.08); }
+  .chips.teal button.on { color: var(--teal); border-color: var(--teal); background: rgba(47,224,176,.08); }
+  .chips.off { opacity: .5; pointer-events: none; }
+  .segmented { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; background: #0f1318; border: 1px solid var(--line2); border-radius: 11px; flex: 1; }
+  .segmented button { padding: 9px 6px; font: 600 13px inherit; font-family: inherit; border: none; background: transparent; color: var(--muted); border-radius: 8px; cursor: pointer; }
+  .segmented button.on { background: var(--lime); color: var(--lime-ink); }
+  .segmented.off { opacity: .5; pointer-events: none; }
+
+  input[type="number"] { width: 72px; padding: 10px 8px; text-align: center; font: 700 15px var(--mono); color: var(--text); background: #0f1318; border: 1px solid var(--line2); border-radius: 10px; }
+  .lenRow { display: flex; gap: 10px; align-items: stretch; }
+
+  /* checkbox */
+  input.chk { appearance: none; -webkit-appearance: none; width: 18px; height: 18px; border: 1.5px solid #3a434f; border-radius: 5px; background: #0f1318; cursor: pointer; position: relative; flex: none; margin: 0; }
+  input.chk:checked { background: var(--lime); border-color: var(--lime); }
+  input.chk:checked::after { content: ""; position: absolute; left: 5px; top: 1.5px; width: 5px; height: 10px; border: solid var(--lime-ink); border-width: 0 2.2px 2.2px 0; transform: rotate(45deg); }
+  .opt { display: flex; align-items: center; gap: 10px; padding: 13px 14px; margin-top: 14px; background: #0f1318; border: 1px solid var(--line); border-radius: 11px; cursor: pointer; font-size: 14px; }
+  .opt b { font-weight: 600; } .opt small { margin-left: auto; font-size: 11.5px; color: var(--muted); text-align: right; }
+  .folderRow { display: flex; align-items: center; gap: 12px; padding: 13px 14px; margin-top: 12px; background: #0f1318; border: 1px solid var(--line); border-radius: 11px; }
+  .folderRow > svg { color: var(--teal); font-size: 17px; }
+  .folderRow .ft { flex: 1; min-width: 0; font-size: 13.5px; }
+  .folderRow #folderLabel { display: block; font-weight: 600; word-break: break-all; }
+  .folderRow #folderSub { display: block; font-size: 11.5px; color: var(--muted); }
+  .folderRow .btns { display: flex; gap: 6px; flex: none; }
+  .folderRow .btn { padding: 6px 12px; font-size: 12.5px; border-radius: 8px; }
+  .liveOpt { margin-top: 12px; }
+
+  .mt { margin-top: 18px; }
+  .btnRow { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+  .btnRow .btn { flex: 1; }
+  .bigBtn { padding: 14px 16px; font-size: 15px; }
+  .bar { height: 8px; background: #0f1318; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-top: 16px; }
+  #barFill { height: 100%; width: 0%; background: var(--lime); transition: width .2s; }
+  #status { margin: 12px 0 0; font-size: 13.5px; font-weight: 600; color: var(--muted); }
+  #status.ok, #capStatus.ok { color: var(--lime); } #status.err, #capStatus.err { color: var(--danger); } #status.work, #capStatus.work { color: var(--warn); }
+  #capStatus { margin: 12px 0 0; font-size: 12.5px; color: var(--muted); }
+  details.tips { margin-top: 16px; font-size: 12.5px; color: var(--muted); }
+  details.tips summary { cursor: pointer; font-weight: 600; color: var(--text); }
+  details.tips ul { margin: 10px 0 0; padding-left: 18px; } details.tips li { margin-bottom: 6px; }
+
+  #capBody.dim .chips, #capBody.dim #capGen { opacity: .55; }
+  .capHead label { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
+
+  /* player */
+  .player { position: relative; width: 100%; max-height: 440px; margin: 0 auto; background: #000; border-radius: 10px; overflow: hidden; aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center; }
   .player video { width: 100%; height: 100%; display: none; object-fit: contain; background: #000; }
-  #placeholder { color: var(--muted); font-size: 15px; padding: 20px; text-align: center; }
-  .saveBox { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
-  label.chk { display: flex; align-items: center; gap: 8px; color: var(--text); cursor: pointer; margin: 0; font-size: 15px; }
-  label.chk input { width: 18px; height: 18px; accent-color: var(--accent); }
-  .saveRow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
-  .saveRow .btn { padding: 8px 14px; font-size: 14px; }
-  .dl-btns { display: flex; gap: 6px; flex: none; flex-wrap: wrap; }
-  button.dl-btn { border: none; cursor: pointer; font-size: 14px; font-family: inherit; }
-  button.dl-btn.alt { background: #2f3b4d; color: var(--text); }
-  button.dl-btn:hover { filter: brightness(1.15); }
-  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.82); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 50; }
-  .modalBox { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; width: 100%; max-width: 720px; }
-  .modalHead { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-weight: 600; word-break: break-all; }
-  #modalVideo { width: 100%; max-height: 68vh; background: #000; border-radius: 8px; margin-top: 10px; }
-  .frameNote { color: var(--muted); font-size: 13px; margin: 8px 0 0; text-align: center; }
-  #bigPlay {
-    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-    width: 74px; height: 74px; border-radius: 50%; border: none; cursor: pointer;
-    background: rgba(18,22,28,.75); color: #fff; font-size: 30px;
-    display: none; align-items: center; justify-content: center; padding: 0 0 0 6px;
-  }
-  #bigPlay:hover { background: var(--accent); color: var(--accent-ink); }
-  .ctrlbar {
-    position: absolute; left: 0; right: 0; bottom: 0; display: none; align-items: center; gap: 10px;
-    padding: 24px 12px 10px; background: linear-gradient(transparent, rgba(0,0,0,.8));
-  }
-  .ctrlbar button {
-    flex: none; width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer;
-    background: rgba(255,255,255,.2); color: #fff; font-size: 14px;
-  }
-  .ctrlbar button:hover { background: var(--accent); color: var(--accent-ink); }
-  #seek { flex: 1; min-width: 0; accent-color: var(--accent); }
-  #timeText { color: #fff; font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #placeholder { color: var(--muted); font-size: 14px; padding: 20px; text-align: center; }
+  .frameNote { color: var(--muted); font-size: 12px; margin: 10px 0 0; text-align: center; }
+  #bigPlay { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 72px; height: 72px; border-radius: 50%; border: none; cursor: pointer; background: rgba(11,13,16,.78); color: #fff; font-size: 28px; display: none; align-items: center; justify-content: center; padding: 0 0 0 6px; }
+  #bigPlay:hover { background: var(--lime); color: var(--lime-ink); }
+  .ctrlbar { position: absolute; left: 0; right: 0; bottom: 0; display: none; align-items: center; gap: 10px; padding: 24px 12px 10px; background: linear-gradient(transparent, rgba(0,0,0,.82)); }
+  .ctrlbar button { flex: none; width: 34px; height: 34px; border-radius: 50%; border: none; cursor: pointer; background: rgba(255,255,255,.18); color: #fff; font-size: 13px; }
+  .ctrlbar button:hover { background: var(--lime); color: var(--lime-ink); }
+  #seek { flex: 1; min-width: 0; accent-color: var(--lime); }
+  #timeText { color: #fff; font: 12px var(--mono); white-space: nowrap; }
+  .rotRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin-top: 14px; }
+  .rotRow input { width: 76px; padding: 7px 6px; }
+  .rotLabel { color: var(--muted); font-size: 13px; }
+  .timeline { display: flex; gap: 3px; margin-top: 14px; height: 8px; }
+  .seg { flex: 1; background: var(--line2); border-radius: 3px; } .seg.active { background: var(--warn); } .seg.done { background: var(--lime); }
 
-  .timeline { display: flex; gap: 3px; margin-top: 12px; height: 12px; }
-  .seg { flex: 1; background: var(--line); border-radius: 3px; }
-  .seg.active { background: var(--warn); }
-  .seg.done { background: var(--accent); }
+  /* clips */
+  .clipsHead { display: flex; align-items: center; gap: 10px; margin: 34px 0 12px; }
+  .clipsHead h2 { margin: 0; font-size: 15px; font-weight: 650; }
+  #clipCount { font: 600 11px var(--mono); color: var(--muted); background: var(--panel); border: 1px solid var(--line2); border-radius: 999px; padding: 2px 9px; }
+  #emptyClips { display: none; align-items: center; justify-content: center; min-height: 130px; border: 1.5px dashed #232a33; border-radius: 12px; color: var(--blue); font-size: 13.5px; padding: 20px; text-align: center; }
+  #resultPanel[style*="none"] + #emptyClips { display: flex; }
+  #emptyClips.first { display: flex; }
+  #downloadsList { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 10px; }
+  #downloadsList .dl-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); font-size: 13px; word-break: break-all; }
+  .dl-btns { display: flex; gap: 6px; flex: none; }
+  button.dl-btn { border: none; cursor: pointer; font: 600 12.5px inherit; font-family: inherit; background: var(--lime); color: var(--lime-ink); padding: 7px 12px; border-radius: 8px; white-space: nowrap; }
+  button.dl-btn.alt { background: #222a34; color: var(--text); }
+  button.dl-btn:hover { filter: brightness(1.12); }
 
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
-  label { display: block; font-size: 14px; color: var(--muted); margin-bottom: 6px; }
-  .row { display: flex; gap: 8px; }
-  input[type="number"], select {
-    width: 100%; padding: 10px 12px; font-size: 15px; color: var(--text);
-    background: #10141a; border: 1px solid var(--line); border-radius: 8px;
-  }
-  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
-
-  .bar { height: 10px; background: #10141a; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-top: 14px; }
-  #barFill { height: 100%; width: 0%; background: var(--accent); transition: width .2s; }
-  #status { margin: 12px 0 0; font-weight: 600; color: var(--muted); }
-  #status.ok { color: var(--accent); }
-  #status.err { color: var(--danger); }
-  #status.work { color: var(--warn); }
-  .hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
-
-  #downloadsList .dl-item {
-    display: flex; justify-content: space-between; align-items: center; gap: 10px;
-    padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; margin-top: 8px; background: #10141a;
-    font-size: 14px; word-break: break-all;
-  }
-  .dl-btn { background: var(--accent); color: var(--accent-ink); padding: 6px 12px; border-radius: 6px; text-decoration: none; font-weight: 600; white-space: nowrap; }
-  .topbar { margin: -8px 0 16px; }
-  .rotRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin-top: 12px; }
-  .rotRow .btn { padding: 8px 12px; font-size: 14px; }
-  .rotRow input { width: 84px; }
-  .rotLabel { color: var(--muted); font-size: 14px; }
-  #capStatus { font-size: 13px; color: var(--muted); margin: 12px 0 0; }
-  #capStatus.ok { color: var(--accent); }
-  #capStatus.err { color: var(--danger); }
-  #capStatus.work { color: var(--warn); }
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 50; }
+  .modalBox { background: var(--panel); border: 1px solid var(--line2); border-radius: 14px; padding: 14px; width: 100%; max-width: 720px; }
+  .modalHead { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-weight: 600; font-size: 14px; word-break: break-all; }
+  #modalVideo { width: 100%; max-height: 68vh; background: #000; border-radius: 10px; margin-top: 12px; }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>Auto Video Splitter v4</h1>
-  <p class="sub">Video choose karein, preview dekhein, phir split karein. Sab kuch aapke browser mein hota hai.</p>
-  <div class="topbar"><button class="btn" id="removeBtn" type="button" style="display:none;">&larr; Back / Remove Video</button></div>
 
-  <div class="panel">
-    <h2>1. Video choose karein</h2>
-    <div id="dropZone">
-      <p id="dropText">Video yahan drag and drop karein, ya button dabayein</p>
-      <label for="fileInput" class="btn primary" style="margin:0; color: var(--accent-ink);">Choose Video</label>
-      <input type="file" id="fileInput" accept="video/*,.mp4,.mkv,.webm,.mov">
-      <p id="fileName" style="margin-top:12px;"></p>
-    </div>
+<div class="top"><div class="in">
+  <div class="brand">
+    <div class="logo"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/></svg></div>
+    <div><b>Auto Video Splitter</b><span>Koi upload nahi, koi limit nahi: sab kuch aap ke browser mein</span></div>
   </div>
+  <div class="badge"><svg viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>100% client-side</div>
+</div></div>
 
-  <div class="panel">
-    <h2>2. Live preview</h2>
-    <div class="player" id="player">
-      <div id="placeholder">Abhi koi video load nahi hui</div>
-      <video id="previewVideo" playsinline></video>
-      <canvas id="capCanvas" style="position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;"></canvas>
-      <button id="bigPlay" aria-label="Play video">&#9654;</button>
-      <div class="ctrlbar" id="ctrlBar">
-        <button id="playBtn" aria-label="Play or pause">&#9654;</button>
-        <input type="range" id="seek" min="0" max="1000" value="0" aria-label="Seek">
-        <span id="timeText">0:00 / 0:00</span>
-      </div>
-    </div>
-    <p class="frameNote" id="frameNote"></p>
-    <div class="rotRow">
-      <span class="rotLabel">Rotate:</span>
-      <button class="btn" id="rotL" type="button">&#8634; 90&deg;</button>
-      <button class="btn" id="rotR" type="button">&#8635; 90&deg;</button>
-      <button class="btn" id="rot180" type="button">180&deg;</button>
-      <input type="number" id="rotDeg" value="0" min="0" max="359" step="1" aria-label="Rotation degrees (clockwise)">
-      <span class="rotLabel">&deg;</span>
-      <button class="btn" id="rotReset" type="button">Reset</button>
-    </div>
-    <div class="timeline" id="timeline"></div>
-  </div>
+<div class="main">
+  <p class="intro">Apni video chunein, preview mein crop aur rotate set karein, captions lagayein aur har clip alag save karein. Sab kuch aap ke device par chalta hai: kuch upload nahi hota.</p>
+  <div class="topbar"><button class="btn sm" id="removeBtn" type="button" style="display:none;">&larr; Back / Remove Video</button></div>
 
-  <div class="panel" id="capPanel">
-    <h2>3. Captions (awaaz se auto)</h2>
-    <label style="display:flex;align-items:center;gap:10px;color:var(--text);font-size:15px;margin:0 0 14px;cursor:pointer;"><input type="checkbox" id="capOn" style="width:18px;height:18px;accent-color:var(--accent);"> Awaaz se captions auto-generate karke clips mein add karein</label>
-    <div class="grid">
-      <div>
-        <label for="capStyle">Caption template</label>
-        <select id="capStyle">
-          <option value="classic">Classic (white + outline)</option>
-          <option value="karaoke">Karaoke (word highlight)</option>
-          <option value="pop">Bold Pop (1-2 bare words)</option>
-          <option value="boxed">Boxed (dark bar)</option>
-          <option value="neon">Neon glow</option>
-          <option value="minimal">Minimal</option>
-        </select>
-      </div>
-      <div>
-        <label for="capPos">Position</label>
-        <select id="capPos">
-          <option value="bottom">Bottom</option>
-          <option value="middle">Middle</option>
-          <option value="top">Top</option>
-        </select>
-      </div>
-    </div>
-    <div class="grid" style="margin-top:12px;">
-      <div>
-        <label for="capModel">AI model (speech language)</label>
-        <select id="capModel">
-          <option value="Xenova/whisper-tiny">Auto language (tiny, ~40 MB)</option>
-          <option value="Xenova/whisper-base">Auto language, better accuracy (base, ~80 MB)</option>
-          <option value="Xenova/whisper-tiny.en">English only (tiny, ~40 MB)</option>
-          <option value="Xenova/whisper-base.en">English only, better accuracy (base, ~80 MB)</option>
-        </select>
-      </div>
-      <div>
-        <label>&nbsp;</label>
-        <button class="btn primary" id="capGen" type="button" disabled>Generate / Regenerate Captions</button>
-      </div>
-    </div>
-    <p id="capStatus">Checkbox tick karte hi video ki awaaz se captions banenge. Default model boli jane wali zubaan khud detect karta hai.</p>
-  </div>
+  <div class="grid2">
+    <div class="col">
 
-  <div class="panel">
-    <h2>4. Split settings</h2>
-    <div class="grid">
-      <div>
-        <label for="splitValue">Split every</label>
-        <div class="row">
-          <input type="number" id="splitValue" value="10" min="1">
-          <select id="timeUnit">
-            <option value="seconds">Seconds</option>
-            <option value="minutes">Minutes</option>
-          </select>
+      <section class="card">
+        <header><h2><span class="step">1</span>Video chunein</h2><span class="hmeta">mp4 &middot; mkv &middot; webm &middot; mov</span></header>
+        <div class="body">
+          <label for="fileInput" id="dropZone">
+            <div class="dzIcon"><svg viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/></svg></div>
+            <div style="min-width:0;">
+              <p id="dropText">Video yahan chhorein</p>
+              <p class="dzSub">Ya click kar ke apni PC se file chunein</p>
+              <p id="fileName"></p>
+            </div>
+            <span class="pill">DRAG &amp; DROP</span>
+          </label>
+          <input type="file" id="fileInput" accept="video/*,.mp4,.mkv,.webm,.mov">
+          <p class="note">File aap ke device se kabhi bahar nahi jati. HEVC/H.265 wali videos browser mein nahi chalti: un ke liye H.264 (mp4) use karein.</p>
         </div>
-      </div>
-      <div>
-        <label for="aspectRatio">Aspect ratio</label>
-        <select id="aspectRatio">
-          <option value="original">Original</option>
-          <option value="16:9">16:9 (YouTube)</option>
-          <option value="9:16">9:16 (Shorts / Reels)</option>
-          <option value="1:1">1:1 (Square)</option>
-        </select>
-      </div>
+      </section>
+
+      <section class="card" id="previewCard" style="display:none;">
+        <header><h2><span class="step">2</span>Preview, crop aur rotate</h2></header>
+        <div class="body">
+          <div class="player" id="player">
+            <div id="placeholder">Abhi koi video load nahi hui</div>
+            <video id="previewVideo" playsinline></video>
+            <canvas id="capCanvas" style="position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;"></canvas>
+            <button id="bigPlay" aria-label="Play video">&#9654;</button>
+            <div class="ctrlbar" id="ctrlBar">
+              <button id="playBtn" aria-label="Play or pause">&#9654;</button>
+              <input type="range" id="seek" min="0" max="1000" value="0" aria-label="Seek">
+              <span id="timeText">0:00 / 0:00</span>
+            </div>
+          </div>
+          <p class="frameNote" id="frameNote"></p>
+
+          <span class="lbl sp">Aspect ratio</span>
+          <div class="chips g4" data-for="aspectRatio">
+            <button type="button" data-v="original">Original</button>
+            <button type="button" data-v="16:9">16:9</button>
+            <button type="button" data-v="9:16">9:16</button>
+            <button type="button" data-v="1:1">1:1</button>
+          </div>
+          <select id="aspectRatio" class="sr" aria-label="Aspect ratio">
+            <option value="original">Original</option>
+            <option value="16:9">16:9 (YouTube)</option>
+            <option value="9:16">9:16 (Shorts / Reels)</option>
+            <option value="1:1">1:1 (Square)</option>
+          </select>
+
+          <span class="lbl sp">Rotate</span>
+          <div class="rotRow" style="margin-top:0;">
+            <button class="btn sm" id="rotL" type="button">&#8634; 90&deg;</button>
+            <button class="btn sm" id="rotR" type="button">&#8635; 90&deg;</button>
+            <button class="btn sm" id="rot180" type="button">180&deg;</button>
+            <input type="number" id="rotDeg" value="0" min="0" max="359" step="1" aria-label="Rotation degrees (clockwise)">
+            <span class="rotLabel">&deg;</span>
+            <button class="btn sm" id="rotReset" type="button">Reset</button>
+          </div>
+          <div class="timeline" id="timeline"></div>
+        </div>
+      </section>
+
     </div>
 
-    <div class="saveBox">
-      <label class="chk"><input type="checkbox" id="autoDl"> Auto download enable (clips ban-te hi khud save hongi)</label>
-      <div class="saveRow">
-        <button class="btn" id="pickFolderBtn" type="button">Select Save Folder</button>
-        <button class="btn" id="clearFolderBtn" type="button" style="display:none;">Folder hatayein</button>
-        <span id="folderLabel" class="hint" style="margin:0;">Folder select nahi hai: normal browser download hogi.</span>
-      </div>
-      <p class="hint">Auto download off ho to clips neeche list mein ready milengi, PC mein save nahi hongi. Aap Preview ya Download khud dabayein.</p>
-    </div>
+    <div class="col">
 
-    <label style="display:flex;align-items:center;gap:10px;color:var(--text);font-size:15px;margin:14px 0 0;cursor:pointer;"><input type="checkbox" id="liveMode" style="width:18px;height:18px;accent-color:var(--accent);"> Live mode (video play hote hue real-time record, slow)</label>
-    <div class="actions">
-      <button class="btn primary" id="splitBtn" disabled>Auto Split and Export</button>
-      <button class="btn" id="quickBtn" disabled>Quick Split (Fast)</button>
-      <select id="quickMode" aria-label="Quick Split mode" style="width:auto;">
-        <option value="exact">Exact seconds + ratio</option>
-        <option value="instant">Instant (keyframe cut, no crop)</option>
-      </select>
-      <button class="btn" id="pauseSplitBtn" style="display:none;">Pause Splitting</button>
-      <button class="btn danger" id="stopBtn" style="display:none;">Stop Splitting</button>
-    </div>
+      <section class="card" id="capPanel">
+        <header class="capHead"><h2><span class="step">3</span>Captions</h2>
+          <label><input type="checkbox" class="chk" id="capOn"> On</label>
+        </header>
+        <div class="body" id="capBody">
+          <span class="lbl">Template</span>
+          <div class="chips g3" data-for="capStyle">
+            <button type="button" data-v="classic">Classic</button>
+            <button type="button" data-v="karaoke">Karaoke</button>
+            <button type="button" data-v="pop">Bold Pop</button>
+            <button type="button" data-v="boxed">Boxed</button>
+            <button type="button" data-v="neon">Neon</button>
+            <button type="button" data-v="minimal">Minimal</button>
+          </div>
+          <select id="capStyle" class="sr" aria-label="Caption template">
+            <option value="classic">Classic</option><option value="karaoke">Karaoke</option><option value="pop">Bold Pop</option>
+            <option value="boxed">Boxed</option><option value="neon">Neon</option><option value="minimal">Minimal</option>
+          </select>
 
-    <div class="bar"><div id="barFill"></div></div>
-    <p id="status">Pehle video select karein.</p>
-    <p class="hint">Split ke dauran video pause karein to splitting bhi ruk jati hai, aur dobara play karne par wahin se continue hoti hai. Is tab ko open aur visible rakhein. Auto Split ab by default fast engine (hardware encoder, parallel clips) use karta hai. Live mode on karein to video play hote hue real-time record hoti hai (slow, lekin preview aur pause kaam karte hain). Quick Split bina play kiye clips banata hai. Mode 'Exact' mein seconds aur aspect ratio dono apply hoti hain (har frame hardware encoder se guzarta hai, to speed PC par depend karti hai; status mein asli speed dikhti hai). Captions on hon to clips Exact ya Live mode mein hi bantay hain (Instant mode captions nahi laga sakta). Rotate buttons video ko kisi bhi degree par ghumate hain (Instant mode sirf 90/180/270 par chalta hai, custom degree ke liye Exact use hota hai). Mode 'Instant' lossless keyframe cut karta hai: bijli jaisa tez, lekin lengths 1-8 sec upar neeche ho sakti hain aur ratio Original rehta hai. Dono H.264 MP4/MOV ke liye hain.</p>
+          <span class="lbl sp">Position</span>
+          <div class="chips g3 teal" data-for="capPos">
+            <button type="button" data-v="bottom">Neeche</button>
+            <button type="button" data-v="middle">Darmiyan</button>
+            <button type="button" data-v="top">Oopar</button>
+          </div>
+          <select id="capPos" class="sr" aria-label="Caption position">
+            <option value="bottom">Bottom</option><option value="middle">Middle</option><option value="top">Top</option>
+          </select>
+
+          <span class="lbl sp">AI model</span>
+          <div class="chips g2" data-for="capModel">
+            <button type="button" data-v="Xenova/whisper-tiny.en">Fast (~40 MB)</button>
+            <button type="button" data-v="Xenova/whisper-base.en">Better (~80 MB)</button>
+          </div>
+          <select id="capModel" class="sr" aria-label="AI model">
+            <option value="Xenova/whisper-tiny.en">Fast (tiny)</option>
+            <option value="Xenova/whisper-base.en">Better accuracy (base)</option>
+          </select>
+
+          <button class="btn wide mt" id="capGen" type="button" disabled><svg viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>Generate Captions</button>
+          <p id="capStatus">Awaaz se English captions banti hain (Whisper, browser ke andar). Pehli baar model download hota hai, is liye thora intezar karein.</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <header><h2><span class="step">4</span>Split settings</h2></header>
+        <div class="body">
+          <span class="lbl">Clip length</span>
+          <div class="lenRow">
+            <input type="number" id="splitValue" value="10" min="1" aria-label="Clip length">
+            <div class="segmented chips" data-for="timeUnit" style="display:grid;">
+              <button type="button" data-v="seconds">Seconds</button>
+              <button type="button" data-v="minutes">Minutes</button>
+            </div>
+          </div>
+          <select id="timeUnit" class="sr" aria-label="Unit">
+            <option value="seconds">Seconds</option><option value="minutes">Minutes</option>
+          </select>
+
+          <label class="opt"><input type="checkbox" class="chk" id="autoDl"><b>Auto download</b><small>list se save karein</small></label>
+
+          <div class="folderRow">
+            <svg viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+            <div class="ft"><span id="folderLabel">Save folder select nahi hua</span><span id="folderSub">Default: Downloads</span></div>
+            <div class="btns">
+              <button class="btn" id="pickFolderBtn" type="button">Select</button>
+              <button class="btn" id="clearFolderBtn" type="button" style="display:none;">Hatayein</button>
+            </div>
+          </div>
+
+          <label class="opt liveOpt"><input type="checkbox" class="chk" id="liveMode"><b>Live mode</b><small>real-time record, slow</small></label>
+
+          <button class="btn primary wide bigBtn mt" id="splitBtn" disabled><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/></svg>Auto Split &amp; Export</button>
+
+          <span class="lbl sp">Quick split</span>
+          <div class="chips g2" data-for="quickMode">
+            <button type="button" data-v="exact" title="Exact seconds + ratio">Exact</button>
+            <button type="button" data-v="instant" title="Keyframe cut, lossless, no crop">Instant</button>
+          </div>
+          <select id="quickMode" class="sr" aria-label="Quick Split mode">
+            <option value="exact">Exact seconds + ratio</option>
+            <option value="instant">Instant (keyframe cut, no crop)</option>
+          </select>
+          <div class="btnRow">
+            <button class="btn" id="quickBtn" disabled>Quick Split (Fast)</button>
+          </div>
+          <div class="btnRow">
+            <button class="btn" id="pauseSplitBtn" style="display:none;">Pause Splitting</button>
+            <button class="btn danger" id="stopBtn" style="display:none;">Stop Splitting</button>
+          </div>
+
+          <div class="bar"><div id="barFill"></div></div>
+          <p id="status">Pehle video select karein.</p>
+
+          <details class="tips">
+            <summary>Tips aur modes</summary>
+            <ul>
+              <li><b>Auto Split</b> by default fast engine (hardware encoder, parallel clips) use karta hai. Live mode on ho to video play hote hue real-time record hoti hai (slow, lekin pause/resume kaam karta hai).</li>
+              <li><b>Quick Split Exact:</b> seconds, aspect ratio, rotate aur captions sab apply hote hain. Speed aap ke PC ke encoder par depend karti hai, status mein asli speed dikhti hai.</li>
+              <li><b>Quick Split Instant:</b> lossless keyframe cut, bohat tez, lekin clip lengths 1-8 sec upar neeche ho sakti hain aur ratio Original rehta hai. Sirf 90/180/270 rotate chalta hai.</li>
+              <li>Captions on hon to Instant mode use nahi hota. Dono Quick modes H.264 MP4/MOV ke liye hain.</li>
+              <li>Split ke dauran is tab ko open aur visible rakhein.</li>
+            </ul>
+          </details>
+        </div>
+      </section>
+
+    </div>
   </div>
 
-  <div class="panel" id="resultPanel" style="display:none;">
-    <h2>Ready clips</h2>
-    <div id="downloadsList"></div>
-  </div>
+  <div class="clipsHead"><h2>Ready clips</h2><span id="clipCount">0</span></div>
+  <div id="resultPanel" style="display:none;"><div id="downloadsList"></div></div>
+  <div id="emptyClips">Abhi koi clip nahi. Video load kar ke Auto Split dabayein.</div>
 </div>
 
 <div id="modal">
   <div class="modalBox">
-    <div class="modalHead"><span id="modalTitle"></span><button class="btn" id="modalClose" type="button">Close</button></div>
+    <div class="modalHead"><span id="modalTitle"></span><button class="btn sm" id="modalClose" type="button">Close</button></div>
     <video id="modalVideo" controls playsinline></video>
   </div>
 </div>
@@ -339,41 +435,6 @@
   const modalVideo = document.getElementById('modalVideo');
   const modalTitle = document.getElementById('modalTitle');
   const modalClose = document.getElementById('modalClose');
-  const editorSessions = new Map();
-
-  window.addEventListener('message', function (event) {
-    const data = event.data;
-    if (!data || data.type !== 'video-editor-ready' || typeof data.token !== 'string') return;
-    const session = editorSessions.get(data.token);
-    if (!session || event.source !== session.window) return;
-    try {
-      session.window.postMessage({
-        type: 'video-editor-load',
-        token: data.token,
-        blob: session.blob,
-        name: session.name
-      }, '*');
-      editorSessions.delete(data.token);
-    } catch (err) {
-      editorSessions.delete(data.token);
-      setStatus('Editor mein video open nahi ho saki: ' + (err && err.message ? err.message : 'error'), 'err');
-    }
-  });
-
-  function openEditor(blob, name) {
-    const editorUrl = new URL('editor.html', window.location.href);
-    const token = Date.now().toString(36) + Math.random().toString(36).slice(2);
-    editorUrl.hash = token;
-    const session = { window: null, blob: blob, name: name };
-    editorSessions.set(token, session);
-    const tab = window.open(editorUrl.href, '_blank');
-    if (!tab) {
-      editorSessions.delete(token);
-      setStatus('Editor tab open nahi hui. Browser mein pop-ups allow karke dobara try karein.', 'err');
-      return;
-    }
-    session.window = tab;
-  }
 
   function setStatus(msg, kind) {
     statusText.className = kind || '';
@@ -536,7 +597,6 @@
   let capKey = '';
   let capBusy = false;
   let capMemo = null;
-  let captionJob = null;
 
   function setCapStatus(msg, kind) {
     capStatus.className = kind || '';
@@ -557,50 +617,34 @@
 
   async function generateCaptions() {
     if (!selectedFile || capBusy) return false;
-    const file = selectedFile;
-    const modelId = capModel.value;
-    const fileKey = capFileKey();
     capBusy = true;
     captionAbort = false;
     capGen.disabled = true;
     splitBtn.disabled = true;
     quickBtn.disabled = true;
-    captionJob = (async function () {
+    try {
       let words;
-      function reportProgress(message) {
-        if (file === selectedFile && fileKey === capFileKey()) setCapStatus(message, 'work');
-      }
       try {
-        words = await transcribeFile(file, modelId, reportProgress, false);
+        words = await transcribeFile(selectedFile, capModel.value, function (m) { setCapStatus(m, 'work'); }, false);
       } catch (err) {
-        if (captionAbort || file !== selectedFile || fileKey !== capFileKey()) throw err;
+        if (captionAbort) throw err;
         setCapStatus('GPU mode fail hua, CPU mode try ho raha hai...', 'work');
-        words = await transcribeFile(file, modelId, reportProgress, true);
+        words = await transcribeFile(selectedFile, capModel.value, function (m) { setCapStatus(m, 'work'); }, true);
       }
-      if (captionAbort || file !== selectedFile || fileKey !== capFileKey()) return false;
       capWords = words;
-      capKey = fileKey;
+      capKey = capFileKey();
       capMemo = null;
       if (words.length > 0) setCapStatus('Captions ready: ' + words.length + ' words. Template badalne par preview mein foran dikhta hai.', 'ok');
       else setCapStatus('Is video mein bolti hui awaaz nahi mili, captions nahi lagenge.', 'err');
       return true;
-    })();
-    try {
-      return await captionJob;
     } catch (err) {
-      if (file === selectedFile && fileKey === capFileKey() && !captionAbort) setCapStatus('Captions nahi ban sake: ' + (err && err.message ? err.message : 'error') + ' (Internet check karein, model pehli baar download hota hai.)', 'err');
+      setCapStatus('Captions nahi ban sake: ' + (err && err.message ? err.message : 'error') + ' (Internet check karein, model pehli baar download hota hai.)', 'err');
       return false;
     } finally {
       capBusy = false;
-      captionJob = null;
       capGen.disabled = !selectedFile;
       splitBtn.disabled = !videoReady;
       quickBtn.disabled = !selectedFile;
-      if (capOn.checked && selectedFile && videoReady && (file !== selectedFile || fileKey !== capFileKey())) {
-        setTimeout(function () {
-          if (!capBusy && capOn.checked && selectedFile && videoReady && (!capWords || capKey !== capFileKey())) generateCaptions();
-        }, 0);
-      }
     }
   }
 
@@ -610,39 +654,7 @@
     return await generateCaptions();
   }
 
-  capOn.addEventListener('change', function () {
-    if (!capOn.checked) {
-      setCapStatus('Captions off hain; checkbox dobara tick karein to awaaz se generate honge.', '');
-      return;
-    }
-    if (!selectedFile) {
-      setCapStatus('Pehle video select karein; load hote hi captions generate honge.', '');
-      return;
-    }
-    if (!videoReady) {
-      setCapStatus('Video load hote hi awaaz se captions generate honge.', 'work');
-      return;
-    }
-    if (capWords && capKey === capFileKey()) {
-      setCapStatus('Captions pehle se ready hain; split karne par clips mein add honge.', 'ok');
-      return;
-    }
-    generateCaptions();
-  });
-
-  capModel.addEventListener('change', function () {
-    capWords = null;
-    capKey = '';
-    capMemo = null;
-    if (!capOn.checked || !selectedFile) return;
-    if (videoReady) generateCaptions();
-    else setCapStatus('Video load hote hi selected model se captions generate honge.', 'work');
-  });
-
-  capGen.addEventListener('click', function () {
-    if (!capOn.checked) capOn.checked = true;
-    generateCaptions();
-  });
+  capGen.addEventListener('click', function () { generateCaptions(); });
 
   const sampleWords = 'Your captions will look like this'.split(' ').map(function (w, i) { return { w: w, s: i * 0.5, e: i * 0.5 + 0.48 }; });
 
@@ -674,7 +686,7 @@
     if (objectURL) { URL.revokeObjectURL(objectURL); objectURL = null; }
     fileInput.value = '';
     fileName.innerText = '';
-    dropText.innerText = 'Video yahan drag and drop karein, ya button dabayein';
+    dropText.innerText = 'Video yahan chhorein';
     previewVideo.style.display = 'none';
     placeholder.style.display = 'block';
     player.style.aspectRatio = '16 / 9';
@@ -683,7 +695,6 @@
     removeBtn.style.display = 'none';
     captionAbort = true;
     capWords = null;
-    capKey = '';
     capMemo = null;
     capGen.disabled = true;
     setCapStatus('Video load karein, phir Generate Captions dabayein. Template ka sample preview mein dikhta hai.', '');
@@ -697,15 +708,13 @@
 
   function processFile(file) {
     if (!file || isRunning) return;
-    captionAbort = true;
     resetVideoState();
     selectedFile = file;
     quickBtn.disabled = false;
     capGen.disabled = false;
     capWords = null;
-    capKey = '';
     capMemo = null;
-    setCapStatus(capOn.checked ? 'Video load hote hi awaaz se captions auto-generate honge.' : 'Captions ke liye checkbox tick karein; phir awaaz se auto-generate honge.', '');
+    setCapStatus('Captions abhi nahi bane. Generate Captions dabayein (ya split par khud ban jayenge).', '');
     removeBtn.style.display = 'inline-block';
     fileName.innerText = file.name + ' (' + (file.size / 1048576).toFixed(1) + ' MB)';
     dropText.innerText = 'Video select ho gayi';
@@ -731,7 +740,6 @@
     ctrlBar.style.display = 'flex';
     updatePlayUI();
     updateTime();
-    if (capOn.checked) generateCaptions();
   });
 
   previewVideo.addEventListener('error', function () {
@@ -1972,7 +1980,7 @@
   function resetFolder(msg) {
     dirHandle = null;
     clearFolderBtn.style.display = 'none';
-    folderLabel.innerText = msg || 'Folder select nahi hai: normal browser download hogi.';
+    folderLabel.innerText = msg || 'Save folder select nahi hua';
   }
 
   let saveQueue = Promise.resolve();
@@ -2025,7 +2033,7 @@
     try {
       dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
       clearFolderBtn.style.display = 'inline-block';
-      folderLabel.innerText = 'Save folder: ' + dirHandle.name + ' (clips isi mein save hongi)';
+      folderLabel.innerText = 'Folder: ' + dirHandle.name;
     } catch (err) {
       /* user ne cancel kar diya */
     }
@@ -2064,15 +2072,8 @@
       }
     });
 
-    const edit = document.createElement('button');
-    edit.type = 'button';
-    edit.className = 'dl-btn alt';
-    edit.innerText = 'Open in editor';
-    edit.addEventListener('click', function () { openEditor(blob, name); });
-
     btns.appendChild(pv);
     btns.appendChild(dl);
-    btns.appendChild(edit);
     div.appendChild(span);
     div.appendChild(btns);
     downloadsList.appendChild(div);
@@ -2275,6 +2276,41 @@
       quickBtn.disabled = !selectedFile;
     }
   });
+
+  /* ---- UI helpers: chips, badges, visibility ---- */
+  const previewCard = document.getElementById('previewCard');
+  const clipCount = document.getElementById('clipCount');
+  const folderSub = document.getElementById('folderSub');
+  const capBody = document.getElementById('capBody');
+
+  function syncUI() {
+    document.querySelectorAll('.chips').forEach(function (grp) {
+      const sel = document.getElementById(grp.getAttribute('data-for'));
+      grp.classList.toggle('off', sel.disabled);
+      grp.querySelectorAll('button').forEach(function (b) {
+        b.classList.toggle('on', b.getAttribute('data-v') === sel.value);
+      });
+    });
+    previewCard.style.display = selectedFile ? 'block' : 'none';
+    dropZone.classList.toggle('loaded', !!selectedFile);
+    clipCount.innerText = String(downloadsList.children.length);
+    folderSub.innerText = dirHandle ? 'Clips isi folder mein save hongi' : 'Default: Downloads';
+    capBody.classList.toggle('dim', !capOn.checked);
+  }
+
+  document.querySelectorAll('.chips').forEach(function (grp) {
+    const sel = document.getElementById(grp.getAttribute('data-for'));
+    grp.querySelectorAll('button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (sel.disabled) return;
+        sel.value = b.getAttribute('data-v');
+        sel.dispatchEvent(new Event('change'));
+        syncUI();
+      });
+    });
+  });
+  setInterval(syncUI, 250);
+  syncUI();
 </script>
 </body>
 </html>
