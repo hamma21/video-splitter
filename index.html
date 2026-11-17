@@ -1795,23 +1795,38 @@
   let asrKey = '';
   let captionAbort = false;
 
+  const HF_BASE = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.6';
+  const HF_FRESH = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.6/dist/transformers.min.js';
+
+  /* NOTE: transformers.js ek fail hui session ko yaad rakhta hai, isliye GPU fail hone ke baad
+     CPU ke liye library ki bilkul nayi copy (alag URL) load hoti hai. */
   async function getAsr(modelId, onStatus, wasmOnly) {
     const key = modelId + (wasmOnly ? '|cpu' : '|auto');
     if (asrPromise && asrKey === key) return asrPromise;
     asrKey = key;
     asrPromise = (async function () {
       onStatus('AI model load ho raha hai (pehli baar download hoga, internet chahiye)...');
-      const mod = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.6');
-      mod.env.allowLocalModels = false;
       const prog = function (p) {
         if (p && p.status === 'progress' && typeof p.progress === 'number') onStatus('Model download: ' + Math.round(p.progress) + '%');
       };
-      if (!wasmOnly && navigator.gpu) {
-        try {
-          return await mod.pipeline('automatic-speech-recognition', modelId, { device: 'webgpu', dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' }, progress_callback: prog });
-        } catch (err) {}
+      let hasGpu = false;
+      if (!wasmOnly && typeof navigator !== 'undefined' && navigator.gpu) {
+        try { hasGpu = !!(await navigator.gpu.requestAdapter()); } catch (err) { hasGpu = false; }
       }
-      return await mod.pipeline('automatic-speech-recognition', modelId, { progress_callback: prog });
+      let usedGpuModule = false;
+      if (hasGpu) {
+        usedGpuModule = true;
+        try {
+          const modG = await import(HF_BASE);
+          modG.env.allowLocalModels = false;
+          return await modG.pipeline('automatic-speech-recognition', modelId, { device: 'webgpu', dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' }, progress_callback: prog });
+        } catch (err) {
+          onStatus('GPU nahi chala, CPU mode par ja rahi hai...');
+        }
+      }
+      const modC = await import(usedGpuModule || wasmOnly ? HF_FRESH : HF_BASE);
+      modC.env.allowLocalModels = false;
+      return await modC.pipeline('automatic-speech-recognition', modelId, { device: 'wasm', progress_callback: prog });
     })();
     asrPromise.catch(function () { asrPromise = null; });
     return asrPromise;
