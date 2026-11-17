@@ -169,6 +169,29 @@
   .modalBox { background: var(--panel); border: 1px solid var(--line2); border-radius: 14px; padding: 14px; width: 100%; max-width: 720px; }
   .modalHead { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-weight: 600; font-size: 14px; word-break: break-all; }
   #modalVideo { width: 100%; max-height: 68vh; background: #000; border-radius: 10px; margin-top: 12px; }
+  .chips.g5 { grid-template-columns: repeat(5, 1fr); }
+  .chips button small { display: block; font-size: 10.5px; font-weight: 500; opacity: .75; margin-top: 2px; }
+  #capEdit { display: none; margin-top: 14px; font-size: 12.5px; color: var(--muted); }
+  #capEdit summary { cursor: pointer; font-weight: 600; color: var(--text); }
+  #capLines { max-height: 260px; overflow: auto; margin-top: 6px; }
+  .capRow { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  .capT { font: 11px var(--mono); color: var(--muted); width: 42px; flex: none; }
+  .capRow input { flex: 1; min-width: 0; padding: 8px 10px; font: 13px inherit; font-family: inherit; color: var(--text); background: #0f1318; border: 1px solid var(--line2); border-radius: 8px; }
+  #editor { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: none; align-items: center; justify-content: center; padding: 14px; z-index: 60; }
+  .edBox { background: var(--panel); border: 1px solid var(--line2); border-radius: 14px; width: 100%; max-width: 980px; max-height: 96vh; overflow: auto; }
+  .edHead { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); font-size: 14px; word-break: break-all; }
+  .edBody { display: grid; grid-template-columns: 1.15fr 1fr; gap: 22px; padding: 18px; }
+  @media (max-width: 780px) { .edBody { grid-template-columns: 1fr; } }
+  .edStage { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }
+  #edFrame { position: relative; overflow: hidden; background: #000; border-radius: 10px; touch-action: none; cursor: grab; user-select: none; max-width: 100%; width: 300px; height: 533px; }
+  #edFrame:active { cursor: grabbing; }
+  #edVideo { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: none; pointer-events: none; }
+  #edCap { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
+  .edTransport { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .edNudge { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  #edZoom { width: 100%; accent-color: var(--lime); }
+  #edStatus { margin: 12px 0 0; font-size: 12.5px; color: var(--muted); }
+  #edStatus.ok { color: var(--lime); } #edStatus.err { color: var(--danger); } #edStatus.work { color: var(--warn); }
 </style>
 </head>
 <body>
@@ -222,17 +245,19 @@
           <p class="frameNote" id="frameNote"></p>
 
           <span class="lbl sp">Aspect ratio</span>
-          <div class="chips g4" data-for="aspectRatio">
+          <div class="chips g5" data-for="aspectRatio">
             <button type="button" data-v="original">Original</button>
             <button type="button" data-v="16:9">16:9</button>
             <button type="button" data-v="9:16">9:16</button>
             <button type="button" data-v="1:1">1:1</button>
+            <button type="button" data-v="4:5">4:5</button>
           </div>
           <select id="aspectRatio" class="sr" aria-label="Aspect ratio">
             <option value="original">Original</option>
             <option value="16:9">16:9 (YouTube)</option>
             <option value="9:16">9:16 (Shorts / Reels)</option>
             <option value="1:1">1:1 (Square)</option>
+            <option value="4:5">4:5 (Instagram post)</option>
           </select>
 
           <span class="lbl sp">Rotate</span>
@@ -281,18 +306,34 @@
             <option value="bottom">Bottom</option><option value="middle">Middle</option><option value="top">Top</option>
           </select>
 
+          <span class="lbl sp">Voice language</span>
+          <div class="chips g2" data-for="capLang">
+            <button type="button" data-v="en">English</button>
+            <button type="button" data-v="tr">Hindi / Urdu / other &rarr; English</button>
+          </div>
+          <select id="capLang" class="sr" aria-label="Voice language">
+            <option value="en">English</option>
+            <option value="tr">Other language, translate to English</option>
+          </select>
+
           <span class="lbl sp">AI model</span>
-          <div class="chips g2" data-for="capModel">
-            <button type="button" data-v="Xenova/whisper-tiny.en">Fast (~40 MB)</button>
-            <button type="button" data-v="Xenova/whisper-base.en">Better (~80 MB)</button>
+          <div class="chips g3" data-for="capModel">
+            <button type="button" data-v="tiny">Fast<small>~40 MB</small></button>
+            <button type="button" data-v="base">Better<small>~80 MB</small></button>
+            <button type="button" data-v="small">Best<small>~250 MB</small></button>
           </div>
           <select id="capModel" class="sr" aria-label="AI model">
-            <option value="Xenova/whisper-tiny.en">Fast (tiny)</option>
-            <option value="Xenova/whisper-base.en">Better accuracy (base)</option>
+            <option value="tiny">Fast (tiny)</option>
+            <option value="base">Better (base)</option>
+            <option value="small">Best (small)</option>
           </select>
 
           <button class="btn wide mt" id="capGen" type="button" disabled><svg viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>Generate Captions</button>
           <p id="capStatus">Awaaz se English captions banti hain (Whisper, browser ke andar). Pehli baar model download hota hai, is liye thora intezar karein.</p>
+          <details id="capEdit">
+            <summary>Captions text edit karein (galti theek karne ke liye)</summary>
+            <div id="capLines"></div>
+          </details>
         </div>
       </section>
 
@@ -367,6 +408,45 @@
   <div id="emptyClips">Abhi koi clip nahi. Video load kar ke Auto Split dabayein.</div>
 </div>
 
+<div id="editor">
+  <div class="edBox">
+    <div class="edHead"><b id="edTitle">Edit clip</b><button class="btn sm" id="edClose" type="button">Close</button></div>
+    <div class="edBody">
+      <div class="edStage">
+        <div id="edFrame"><video id="edVideo" playsinline loop></video><canvas id="edCap"></canvas></div>
+        <div class="edTransport">
+          <button class="btn sm" id="edPlay" type="button">Play / Pause</button>
+          <span class="hmeta">Video ko drag karein: left, right, up, down</span>
+        </div>
+      </div>
+      <div class="edSide">
+        <span class="lbl">Platform / aspect ratio</span>
+        <div class="chips g2" id="edPresets">
+          <button type="button" data-v="9:16">YouTube Shorts<small>9:16</small></button>
+          <button type="button" data-v="9:16">TikTok<small>9:16</small></button>
+          <button type="button" data-v="9:16">Instagram Reels<small>9:16</small></button>
+          <button type="button" data-v="4:5">Instagram Post<small>4:5</small></button>
+          <button type="button" data-v="1:1">Square<small>1:1</small></button>
+          <button type="button" data-v="16:9">YouTube Landscape<small>16:9</small></button>
+          <button type="button" data-v="original">Original<small>no crop</small></button>
+        </div>
+        <span class="lbl sp">Zoom / crop</span>
+        <input type="range" id="edZoom" min="100" max="400" value="100" step="5" aria-label="Zoom">
+        <span class="lbl sp">Position</span>
+        <div class="edNudge">
+          <button class="btn sm" id="edLeft" type="button">&larr;</button>
+          <button class="btn sm" id="edRight" type="button">&rarr;</button>
+          <button class="btn sm" id="edUp" type="button">&uarr;</button>
+          <button class="btn sm" id="edDown" type="button">&darr;</button>
+          <button class="btn sm" id="edCenter" type="button">Center</button>
+        </div>
+        <button class="btn primary wide bigBtn mt" id="edExport" type="button">Export edited clip</button>
+        <p id="edStatus"></p>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="modal">
   <div class="modalBox">
     <div class="modalHead"><span id="modalTitle"></span><button class="btn sm" id="modalClose" type="button">Close</button></div>
@@ -421,6 +501,20 @@
   const capGen = document.getElementById('capGen');
   const capStatus = document.getElementById('capStatus');
   const capCanvas = document.getElementById('capCanvas');
+  const capLang = document.getElementById('capLang');
+  const capEdit = document.getElementById('capEdit');
+  const capLines = document.getElementById('capLines');
+  const edModal = document.getElementById('editor');
+  const edFrame = document.getElementById('edFrame');
+  const edVideo = document.getElementById('edVideo');
+  const edCap = document.getElementById('edCap');
+  const edPlay = document.getElementById('edPlay');
+  const edZoom = document.getElementById('edZoom');
+  const edExport = document.getElementById('edExport');
+  const edStatus = document.getElementById('edStatus');
+  const edTitle = document.getElementById('edTitle');
+  const edClose = document.getElementById('edClose');
+  const edPresets = document.getElementById('edPresets');
   const removeBtn = document.getElementById('removeBtn');
   let runToken = 0;
   let partEnding = false;
@@ -453,6 +547,7 @@
     if (r === '16:9') return 16 / 9;
     if (r === '9:16') return 9 / 16;
     if (r === '1:1') return 1;
+    if (r === '4:5') return 4 / 5;
     return 0;
   }
 
@@ -603,8 +698,12 @@
     capStatus.innerText = msg;
   }
 
+  function capModelId() {
+    return 'Xenova/whisper-' + capModel.value + (capLang.value === 'en' ? '.en' : '');
+  }
+
   function capFileKey() {
-    return selectedFile ? selectedFile.name + '|' + selectedFile.size + '|' + selectedFile.lastModified + '|' + capModel.value : '';
+    return selectedFile ? selectedFile.name + '|' + selectedFile.size + '|' + selectedFile.lastModified + '|' + capModelId() : '';
   }
 
   function currentCap() {
@@ -625,15 +724,17 @@
     try {
       let words;
       try {
-        words = await transcribeFile(selectedFile, capModel.value, function (m) { setCapStatus(m, 'work'); }, false);
+        words = await transcribeFile(selectedFile, capModelId(), function (m) { setCapStatus(m, 'work'); }, false, capLang.value === 'en' ? 'transcribe' : 'translate');
       } catch (err) {
         if (captionAbort) throw err;
         setCapStatus('GPU mode fail hua, CPU mode try ho raha hai...', 'work');
-        words = await transcribeFile(selectedFile, capModel.value, function (m) { setCapStatus(m, 'work'); }, true);
+        words = await transcribeFile(selectedFile, capModelId(), function (m) { setCapStatus(m, 'work'); }, true, capLang.value === 'en' ? 'transcribe' : 'translate');
       }
       capWords = words;
       capKey = capFileKey();
       capMemo = null;
+      capOn.checked = true;
+      renderCapLines();
       if (words.length > 0) setCapStatus('Captions ready: ' + words.length + ' words. Template badalne par preview mein foran dikhta hai.', 'ok');
       else setCapStatus('Is video mein bolti hui awaaz nahi mili, captions nahi lagenge.', 'err');
       return true;
@@ -696,6 +797,7 @@
     captionAbort = true;
     capWords = null;
     capMemo = null;
+    renderCapLines();
     capGen.disabled = true;
     setCapStatus('Video load karein, phir Generate Captions dabayein. Template ka sample preview mein dikhta hai.', '');
     rotInput.value = 0;
@@ -714,6 +816,7 @@
     capGen.disabled = false;
     capWords = null;
     capMemo = null;
+    renderCapLines();
     setCapStatus('Captions abhi nahi bane. Generate Captions dabayein (ya split par khud ban jayenge).', '');
     removeBtn.style.display = 'inline-block';
     fileName.innerText = file.name + ' (' + (file.size / 1048576).toFixed(1) + ' MB)';
@@ -1227,9 +1330,11 @@
         duration: vDur,
         count: starts.length,
         makeClip: async function (k) {
-          return assemble(function (tr) {
+          const r1 = assemble(function (tr) {
             return { a: tr.bounds.at(k), b: k + 1 < starts.length ? tr.bounds.at(k + 1) : tr.n };
           }, null);
+          r1.startSec = v.dts.at(starts.at(k)) / v.ts;
+          return r1;
         }
       };
     }
@@ -1252,7 +1357,7 @@
     const cb = cropFor(oddRot ? srcH : srcW, oddRot ? srcW : srcH, opts.ratio || 'original');
     const crop = totalRot === 0 ? cropFor(srcW, srcH, opts.ratio || 'original') : { sx: 0, sy: 0, w: cb.w, h: cb.h };
     const fps = Math.max(1, v.n / vDur);
-    const ctx = { file: file, v: v, desc: avcDesc, srcW: srcW, srcH: srcH, crop: crop, rot: totalRot, cap: opts.captions || null };
+    const ctx = { file: file, v: v, desc: avcDesc, srcW: srcW, srcH: srcH, crop: crop, rot: totalRot, cap: opts.captions || null, frame: opts.frame || null };
     let encodeSeg = opts.encodeSegment;
     if (!encodeSeg) {
       if (typeof VideoDecoder === 'undefined' || typeof VideoEncoder === 'undefined') throw new Error('Browser mein WebCodecs nahi hai.');
@@ -1285,7 +1390,7 @@
         enc.chunks.forEach(function (c, i) { if (c.key) sync.push(i + 1); });
         const ov = { chunks: enc.chunks, deltas: deltas, sync: sync, stsd: buildStsd(enc.width, enc.height, enc.description), width: enc.width, height: enc.height };
         const lastClip = k === count - 1;
-        return assemble(function (tr) {
+        const r2 = assemble(function (tr) {
           let a = 0;
           while (a < tr.n && tr.dts.at(a) / tr.ts < t0 - 0.0005) a++;
           let b = a;
@@ -1293,6 +1398,8 @@
           else while (b < tr.n && tr.dts.at(b) / tr.ts < t1 - 0.0005) b++;
           return { a: a, b: b };
         }, ov);
+        r2.startSec = t0;
+        return r2;
       }
     };
   }
@@ -1302,6 +1409,7 @@
     if (ratio === '16:9') a = 16 / 9;
     else if (ratio === '9:16') a = 9 / 16;
     else if (ratio === '1:1') a = 1;
+    else if (ratio === '4:5') a = 4 / 5;
     let w = vw;
     let h = vh;
     if (a > 0) {
@@ -1388,12 +1496,14 @@
 
     const crop = ctx.crop;
     const rot = ctx.rot || 0;
-    const useCanvas = rot !== 0 || !!ctx.cap;
+    const useCanvas = rot !== 0 || !!ctx.cap || !!ctx.frame;
     const needCrop = !useCanvas && (crop.w !== ctx.srcW || crop.h !== ctx.srcH);
     let oc = null;
     let octx = null;
     let rcos = 1;
     let rsin = 0;
+    let panPx = 0;
+    let panPy = 0;
     if (useCanvas) {
       oc = new OffscreenCanvas(crop.w, crop.h);
       octx = oc.getContext('2d');
@@ -1401,8 +1511,11 @@
       const ac = Math.abs(Math.cos(rad));
       const as = Math.abs(Math.sin(rad));
       const kk = Math.max(1, (crop.w * ac + crop.h * as) / ctx.srcW, (crop.w * as + crop.h * ac) / ctx.srcH);
-      rcos = kk * Math.cos(rad);
-      rsin = kk * Math.sin(rad);
+      const zm = ctx.frame ? ctx.frame.zoom : 1;
+      rcos = kk * zm * Math.cos(rad);
+      rsin = kk * zm * Math.sin(rad);
+      panPx = ctx.frame ? ctx.frame.panX * crop.w : 0;
+      panPy = ctx.frame ? ctx.frame.panY * crop.h : 0;
     }
     const fdur = Math.round(1000000 / fps);
     const gop = Math.max(1, Math.round(fps * 2));
@@ -1438,7 +1551,7 @@
             }
             let f2;
             if (useCanvas) {
-              octx.setTransform(rcos, rsin, -rsin, rcos, crop.w / 2, crop.h / 2);
+              octx.setTransform(rcos, rsin, -rsin, rcos, crop.w / 2 + panPx, crop.h / 2 + panPy);
               octx.drawImage(frame, -frame.displayWidth / 2, -frame.displayHeight / 2, frame.displayWidth, frame.displayHeight);
               if (ctx.cap) drawCaption(octx, crop.w, crop.h, pts / 1000000, ctx.cap);
               f2 = new VideoFrame(oc, { timestamp: pts - t0us, duration: fdur });
@@ -1580,6 +1693,7 @@
 
   function drawCaption(ctx, W, H, t, cap) {
     if (!cap || !cap.groups || cap.groups.length === 0) return;
+    t = t + (cap.offset || 0);
     const g = findGroup(cap.groups, t);
     if (!g) return;
     const st = cap.style;
@@ -1743,7 +1857,15 @@
     return best;
   }
 
-  async function transcribeFile(file, modelId, onStatus, wasmOnly) {
+  async function runAsr(asr, seg, base) {
+    try {
+      return await asr(seg, Object.assign({ return_timestamps: 'word' }, base));
+    } catch (err) {
+      return await asr(seg, Object.assign({ return_timestamps: true }, base));
+    }
+  }
+
+  async function transcribeFile(file, modelId, onStatus, wasmOnly, task) {
     const audio = await getAudio16k(file, onStatus);
     const asr = await getAsr(modelId, onStatus, wasmOnly);
     const SR = 16000;
@@ -1758,8 +1880,8 @@
       const seg = audio.subarray(pos, end);
       onStatus('Captions ban rahe hain: ' + Math.round((pos / total) * 100) + '% (' + words.length + ' words)');
       await new Promise(function (r) { setTimeout(r, 0); });
-      if (rmsOf(seg) > 0.004) {
-        const out = await asr(seg, { return_timestamps: 'word' });
+      if (rmsOf(seg) > 0.001) {
+        const out = await runAsr(asr, seg, task === 'translate' ? { task: 'translate' } : {});
         const off = pos / SR;
         (out.chunks || []).forEach(function (c) {
           const txt = (c.text || '').trim();
@@ -1771,7 +1893,13 @@
           const s = off + (t0 || 0);
           let e = off + (t1 || ((t0 || 0) + 0.3));
           if (e <= s) e = s + 0.25;
-          words.push({ w: txt, s: s, e: e });
+          const parts = txt.split(' ').filter(function (x) { return x.length > 0; });
+          if (parts.length > 1) {
+            const each = (e - s) / parts.length;
+            parts.forEach(function (pw, pi) { words.push({ w: pw, s: s + pi * each, e: s + (pi + 1) * each }); });
+          } else {
+            words.push({ w: txt, s: s, e: e });
+          }
         });
       }
       pos = end;
@@ -1842,7 +1970,7 @@
         if (isCancelled || myRun !== runToken) return;
         const name = 'part_' + String(k + 1).padStart(3, '0') + '_' + (exactMode ? ratioVal.replace(':', 'x') : 'original') + (rotDeg ? '_rot' + rotDeg : '') + '.mp4';
         const url = URL.createObjectURL(res.blob);
-        const dlBtn = addDownload(res.blob, url, name, res.duration);
+        const dlBtn = addDownload(res.blob, url, name, res.duration, { editable: true, startSec: res.startSec || 0 });
         if (autoDl.checked) {
           await autoSaveClip(res.blob, url, name, dlBtn);
         }
@@ -2041,7 +2169,7 @@
 
   clearFolderBtn.addEventListener('click', function () { resetFolder(); });
 
-  function addDownload(blob, url, name, secs) {
+  function addDownload(blob, url, name, secs, meta) {
     resultPanel.style.display = 'block';
     const div = document.createElement('div');
     div.className = 'dl-item';
@@ -2073,6 +2201,16 @@
     });
 
     btns.appendChild(pv);
+    if (meta && meta.editable) {
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'dl-btn alt';
+      editBtn.innerText = 'Edit';
+      editBtn.addEventListener('click', function () {
+        openEditor({ blob: blob, url: url, name: name, startSec: meta.startSec || 0, dur: secs });
+      });
+      btns.appendChild(editBtn);
+    }
     btns.appendChild(dl);
     div.appendChild(span);
     div.appendChild(btns);
@@ -2277,6 +2415,230 @@
     }
   });
 
+
+  /* ---- caption text editor ---- */
+  let editGroups = [];
+
+  function renderCapLines() {
+    capLines.innerHTML = '';
+    editGroups = [];
+    if (!capWords || capWords.length === 0) {
+      capEdit.style.display = 'none';
+      return;
+    }
+    capEdit.style.display = 'block';
+    editGroups = groupWords(capWords, 7);
+    editGroups.forEach(function (g) {
+      const row = document.createElement('div');
+      row.className = 'capRow';
+      const tm = document.createElement('span');
+      tm.className = 'capT';
+      tm.innerText = fmt(g.s);
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.value = g.words.map(function (w) { return w.w; }).join(' ');
+      inp.addEventListener('change', function () { applyLineEdit(g, inp.value); });
+      row.appendChild(tm);
+      row.appendChild(inp);
+      capLines.appendChild(row);
+    });
+  }
+
+  function applyLineEdit(g, text) {
+    const parts = text.split(' ').filter(function (x) { return x.length > 0; });
+    const span = Math.max(0.3, g.e - g.s);
+    g.words = parts.map(function (w, i) {
+      return { w: w, s: g.s + (i * span) / parts.length, e: g.s + ((i + 1) * span) / parts.length };
+    });
+    const flat = [];
+    editGroups.forEach(function (gg) { gg.words.forEach(function (w) { flat.push(w); }); });
+    capWords = flat;
+    capMemo = null;
+  }
+
+  /* ---- clip editor: drag, zoom, aspect ratio presets ---- */
+  let ed = null;
+  let edDrag = null;
+
+  function setEdStatus(msg, kind) {
+    edStatus.className = kind || '';
+    edStatus.innerText = msg;
+  }
+
+  function edSyncChips() {
+    let marked = false;
+    edPresets.querySelectorAll('button').forEach(function (b) {
+      let on = false;
+      if (ed) {
+        if (ed.preset) {
+          on = b === ed.preset;
+        } else if (!marked && b.getAttribute('data-v') === ed.ratio) {
+          on = true;
+          marked = true;
+        }
+      }
+      b.classList.toggle('on', on);
+    });
+  }
+
+  function edLayout() {
+    if (!ed || !edVideo.videoWidth) return;
+    const out = cropFor(edVideo.videoWidth, edVideo.videoHeight, ed.ratio);
+    const stageW = edFrame.parentElement.clientWidth || 320;
+    const maxH = Math.max(240, window.innerHeight * 0.58);
+    const a = out.w / out.h;
+    const w = Math.min(stageW, maxH * a);
+    const h = w / a;
+    edFrame.style.width = w + 'px';
+    edFrame.style.height = h + 'px';
+    const c = w / out.w;
+    const vw = edVideo.videoWidth * c * ed.zoom;
+    const vh = edVideo.videoHeight * c * ed.zoom;
+    const mx = Math.max(0, (vw - w) / 2 / w);
+    const my = Math.max(0, (vh - h) / 2 / h);
+    ed.panX = Math.max(-mx, Math.min(mx, ed.panX));
+    ed.panY = Math.max(-my, Math.min(my, ed.panY));
+    edVideo.style.width = vw + 'px';
+    edVideo.style.height = vh + 'px';
+    edVideo.style.left = (50 + ed.panX * 100) + '%';
+    edVideo.style.top = (50 + ed.panY * 100) + '%';
+    ed.fw = w;
+    ed.fh = h;
+  }
+
+  function openEditor(clip) {
+    ed = { clip: clip, ratio: aspectRatio.value === 'original' ? '9:16' : aspectRatio.value, preset: null, zoom: 1, panX: 0, panY: 0, busy: false, fw: 300, fh: 533 };
+    edTitle.innerText = 'Edit: ' + clip.name;
+    edZoom.value = 100;
+    setEdStatus('Video ko drag karke position set karein, phir Export dabayein.', '');
+    edModal.style.display = 'flex';
+    edVideo.muted = true;
+    edVideo.onloadedmetadata = function () {
+      edLayout();
+      const pp = edVideo.play();
+      if (pp && pp.catch) pp.catch(function () {});
+    };
+    edVideo.src = clip.url;
+    edSyncChips();
+  }
+
+  function closeEditor() {
+    edVideo.pause();
+    edVideo.removeAttribute('src');
+    edVideo.load();
+    edModal.style.display = 'none';
+    ed = null;
+  }
+
+  edClose.addEventListener('click', closeEditor);
+  edPlay.addEventListener('click', function () {
+    if (edVideo.paused) {
+      const pp = edVideo.play();
+      if (pp && pp.catch) pp.catch(function () {});
+    } else {
+      edVideo.pause();
+    }
+  });
+
+  edPresets.querySelectorAll('button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      if (!ed) return;
+      ed.ratio = b.getAttribute('data-v');
+      ed.preset = b;
+      ed.panX = 0;
+      ed.panY = 0;
+      edSyncChips();
+      edLayout();
+    });
+  });
+
+  edZoom.addEventListener('input', function () {
+    if (!ed) return;
+    ed.zoom = Number(edZoom.value) / 100;
+    edLayout();
+  });
+
+  function edNudge(dx, dy) {
+    if (!ed) return;
+    ed.panX += dx;
+    ed.panY += dy;
+    edLayout();
+  }
+  document.getElementById('edLeft').addEventListener('click', function () { edNudge(-0.03, 0); });
+  document.getElementById('edRight').addEventListener('click', function () { edNudge(0.03, 0); });
+  document.getElementById('edUp').addEventListener('click', function () { edNudge(0, -0.03); });
+  document.getElementById('edDown').addEventListener('click', function () { edNudge(0, 0.03); });
+  document.getElementById('edCenter').addEventListener('click', function () {
+    if (!ed) return;
+    ed.panX = 0;
+    ed.panY = 0;
+    edLayout();
+  });
+
+  edFrame.addEventListener('pointerdown', function (e) {
+    if (!ed) return;
+    edDrag = { x: e.clientX, y: e.clientY, px: ed.panX, py: ed.panY };
+    try { edFrame.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  edFrame.addEventListener('pointermove', function (e) {
+    if (!edDrag || !ed) return;
+    ed.panX = edDrag.px + (e.clientX - edDrag.x) / ed.fw;
+    ed.panY = edDrag.py + (e.clientY - edDrag.y) / ed.fh;
+    edLayout();
+  });
+  edFrame.addEventListener('pointerup', function () { edDrag = null; });
+  edFrame.addEventListener('pointercancel', function () { edDrag = null; });
+  window.addEventListener('resize', function () { edLayout(); });
+
+  setInterval(function () {
+    if (!ed) return;
+    const w = edCap.clientWidth;
+    const h = edCap.clientHeight;
+    if (!w || !h) return;
+    if (edCap.width !== w || edCap.height !== h) {
+      edCap.width = w;
+      edCap.height = h;
+    }
+    const cx = edCap.getContext('2d');
+    cx.clearRect(0, 0, w, h);
+    const base = currentCap();
+    if (base) drawCaption(cx, w, h, edVideo.currentTime, Object.assign({}, base, { offset: ed.clip.startSec || 0 }));
+  }, 80);
+
+  edExport.addEventListener('click', async function () {
+    if (!ed || ed.busy) return;
+    if (typeof VideoDecoder === 'undefined' || typeof VideoEncoder === 'undefined') {
+      setEdStatus('Is browser mein WebCodecs nahi hai. Chrome ya Edge use karein.', 'err');
+      return;
+    }
+    ed.busy = true;
+    edExport.disabled = true;
+    setEdStatus('Export ho raha hai, thora intezar karein...', 'work');
+    try {
+      const base = currentCap();
+      const capForClip = base ? Object.assign({}, base, { offset: ed.clip.startSec || 0 }) : null;
+      const plan = await planQuickSplit(ed.clip.blob, 100000000, {
+        exact: true,
+        ratio: ed.ratio,
+        rotate: 0,
+        captions: capForClip,
+        frame: { zoom: ed.zoom, panX: ed.panX, panY: ed.panY }
+      });
+      const res = await plan.makeClip(0);
+      const stem = ed.clip.name.replace(/\.mp4$/, '');
+      const name = stem + '_edit_' + ed.ratio.replace(':', 'x') + '.mp4';
+      const url = URL.createObjectURL(res.blob);
+      const dlBtn = addDownload(res.blob, url, name, res.duration, { editable: true, startSec: ed.clip.startSec || 0 });
+      if (autoDl.checked) await autoSaveClip(res.blob, url, name, dlBtn);
+      setEdStatus('Ho gaya! Edited clip "Ready clips" list mein add ho gayi.', 'ok');
+    } catch (err) {
+      setEdStatus('Export fail: ' + (err && err.message ? err.message : 'error'), 'err');
+    } finally {
+      if (ed) ed.busy = false;
+      edExport.disabled = false;
+    }
+  });
+
   /* ---- UI helpers: chips, badges, visibility ---- */
   const previewCard = document.getElementById('previewCard');
   const clipCount = document.getElementById('clipCount');
@@ -2284,7 +2646,7 @@
   const capBody = document.getElementById('capBody');
 
   function syncUI() {
-    document.querySelectorAll('.chips').forEach(function (grp) {
+    document.querySelectorAll('.chips[data-for]').forEach(function (grp) {
       const sel = document.getElementById(grp.getAttribute('data-for'));
       grp.classList.toggle('off', sel.disabled);
       grp.querySelectorAll('button').forEach(function (b) {
@@ -2298,7 +2660,7 @@
     capBody.classList.toggle('dim', !capOn.checked);
   }
 
-  document.querySelectorAll('.chips').forEach(function (grp) {
+  document.querySelectorAll('.chips[data-for]').forEach(function (grp) {
     const sel = document.getElementById(grp.getAttribute('data-for'));
     grp.querySelectorAll('button').forEach(function (b) {
       b.addEventListener('click', function () {
